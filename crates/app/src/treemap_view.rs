@@ -23,7 +23,7 @@ use treemap::{squarify, Rect};
 use crate::theme::{self, Category};
 
 const MIN_CELL: f32 = 3.0; // don't draw cells smaller than this (short side, px)
-const HEADER_H: f32 = 18.0; // directory title strip
+const HEADER_H: f32 = 20.0; // directory title strip (tall enough for the label)
 const PAD: f32 = 2.0; // gap between a directory header and its nested children
 const NEST_PREVIEW: u32 = 1; // levels of nested preview drawn under each cell
 const LABEL_FONT: f32 = 11.0;
@@ -292,7 +292,9 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
 
 /// Draw `name` (plus size if there is room), ellipsized to fit `area`.
 fn draw_label(ctx: &Paint, area: ERect, name: &str, size: u64, color: Color32) {
-    let inner = area.shrink(4.0);
+    // Small vertical inset so the label still fits inside the directory header
+    // strip (the wider vertical padding used to push the text out of the strip).
+    let inner = area.shrink2(Vec2::new(4.0, 2.0));
     if ctx.char_w <= 0.0 || inner.width() < ctx.char_w * 2.0 || inner.height() < ctx.line_h {
         return;
     }
