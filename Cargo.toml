@@ -5,6 +5,8 @@ members = ["crates/scanner", "crates/treemap", "crates/app"]
 [workspace.package]
 edition = "2021"
 license = "MIT"
+authors = ["Ty Johnston (Fopull LLC)"]
+homepage = "https://fopull.com"
 repository = "https://github.com/fopull/StorageSifter"
 
 # Release profile: optimized, but kept light to compile. `codegen-units = 1`
