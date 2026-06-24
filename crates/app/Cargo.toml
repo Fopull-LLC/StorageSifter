@@ -16,4 +16,5 @@ path = "src/main.rs"
 # Linux session types. egui itself is re-exported as `eframe::egui`.
 eframe = { version = "=0.34.3", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
 scanner = { path = "../scanner" }
+sysinfo = { version = "=0.39.5", default-features = false, features = ["disk"] }
 treemap = { path = "../treemap" }

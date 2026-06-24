@@ -64,7 +64,8 @@ cargo test  -p scanner         # run the scanner's correctness tests
 ## Running the visualizer
 
 ```sh
-cargo run -p app -- [PATH]    # treemap of PATH (defaults to $HOME)
+cargo run -p app             # pick a filesystem from the device list
+cargo run -p app -- [PATH]   # …or scan PATH directly
 ```
 
 A dark, GPU-rendered window opens and a background scan fills in a squarified
@@ -78,8 +79,12 @@ archives pink. One level of nested preview is drawn inside each folder.
   cell you clicked.
 - The **breadcrumb** (top bar) shows where you are; click any segment to jump
   back up. **Backspace** or **Esc** goes up one level.
-- **Hover** a cell to read its full path and size in the status bar.
-- **Rescan** re-reads the directory.
+- **Hover** a cell to read its full path, size, and category in the status bar.
+- **Rescan** re-reads the directory; **Devices** (top-left) returns to the
+  picker. The picker lists each filesystem with its used/free space; picking one
+  scans the whole filesystem and **crosses btrfs subvolumes** (`/home`, `/var`,
+  …) — which are outlined in cyan so the boundaries are obvious. (Scanning a path
+  directly still stays on its single filesystem, matching `du -x`.)
 
 The first build pulls in the GUI stack and takes a few minutes; after that,
 rebuilds of the app are seconds. A `--release` build is available for maximum

@@ -4,14 +4,14 @@
 //! egui `Painter`: flat category-colored cells, hard 1px borders, ellipsized
 //! labels, and one level of nested preview inside directories.
 //!
-//! The zoom animation is a *camera*: during a transition the whole current view
-//! is rendered through an affine [`Xform`] that maps a shrinking/growing
-//! `source` rect onto the full area, so drilling in zooms *into* a cell (its
-//! neighbours slide off the edges) rather than blanking the screen. Interaction
-//! is suspended until the camera settles.
+//! The zoom is a **cross-fade between two views**: during a transition the
+//! parent view is rendered zooming *into* the pivot cell (and fading out) while
+//! the child view is rendered growing *out of* the pivot cell (and fading in).
+//! Because the child view ends exactly at its settled full-screen layout, there
+//! is no snap when the animation completes — it morphs the whole way.
 //!
-//! Two interaction results are reported: the *innermost* cell under the pointer
-//! (for the status bar) and, on a click, the *top-level* child clicked (the
+//! Two interaction results are reported when idle: the *innermost* cell under
+//! the pointer (status bar) and, on a click, the *top-level* child clicked (the
 //! drill-down target — one level per click).
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, StrokeKind, Vec2};
@@ -34,11 +34,17 @@ pub struct Hit {
     pub rect: ERect,
 }
 
-/// One frame of an in-progress zoom: the (already-eased) `source` rect that the
-/// camera maps onto the full area.
+/// One frame of an in-progress zoom between `parent` and `child`, connected at
+/// the `pivot` cell (the child's rectangle within the parent's layout).
 #[derive(Clone, Copy)]
 pub struct Anim {
-    pub source: ERect,
+    pub parent: NodeId,
+    pub child: NodeId,
+    pub pivot: ERect,
+    /// Eased progress in `0.0..=1.0`.
+    pub e: f32,
+    /// `true` = drilling in (parent → child); `false` = zooming out (child → parent).
+    pub drilling_in: bool,
 }
 
 /// What the treemap reported this frame.
@@ -51,19 +57,50 @@ pub struct Interaction {
     pub area: ERect,
 }
 
-/// Render the children of `current` as a treemap filling the available space.
+/// Render the children of `current` (or, during a zoom, the cross-faded parent
+/// and child views) filling the available space.
 pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>) -> Interaction {
     let size = ui.available_size();
     let (area, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter_at(area);
     painter.rect_filled(area, 0, theme::BG);
 
-    let interactive = anim.is_none();
-    let xform = match anim {
-        Some(a) => Xform { source: a.source, area },
-        None => Xform::identity(area),
-    };
+    let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), theme::TEXT);
+    let (char_w, line_h) = (probe.size().x, probe.size().y);
 
+    // --- Animating: cross-fade the parent (zooming) and child (growing) views.
+    if let Some(a) = anim {
+        let (p_src, p_alpha, c_dst, c_alpha) = if a.drilling_in {
+            (lerp_rect(area, a.pivot, a.e), 1.0 - a.e, lerp_rect(a.pivot, area, a.e), a.e)
+        } else {
+            (lerp_rect(a.pivot, area, a.e), a.e, lerp_rect(area, a.pivot, a.e), 1.0 - a.e)
+        };
+        let mut sink = None;
+        let parent = Paint {
+            painter: &painter,
+            tree,
+            area,
+            xform: Xform { src: p_src, dst: area },
+            alpha: p_alpha,
+            hover_pos: None,
+            char_w,
+            line_h,
+        };
+        draw_node_children(&parent, a.parent, &mut sink);
+        let child = Paint {
+            xform: Xform { src: area, dst: c_dst },
+            alpha: c_alpha,
+            ..parent
+        };
+        draw_node_children(&child, a.child, &mut sink);
+        return Interaction {
+            hovered: None,
+            clicked: None,
+            area,
+        };
+    }
+
+    // --- Idle: a single static view that responds to the pointer.
     let children = sorted_children(tree, current);
     if children.is_empty() {
         painter.text(
@@ -80,26 +117,24 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
         };
     }
 
-    // Monospace metrics, measured once and reused for every label.
-    let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), theme::TEXT);
     let ctx = Paint {
         painter: &painter,
         tree,
-        xform,
-        hover_pos: if interactive { response.hover_pos() } else { None },
-        char_w: probe.size().x,
-        line_h: probe.size().y,
+        area,
+        xform: Xform::identity(area),
+        alpha: 1.0,
+        hover_pos: response.hover_pos(),
+        char_w,
+        line_h,
     };
-
     let weights: Vec<u64> = children.iter().map(|&id| tree.node(id).size).collect();
     let rects = squarify(&weights, to_layout(area));
-
     let mut hovered = None;
     for (&id, rect) in children.iter().zip(&rects) {
         draw_cell(&ctx, id, *rect, NEST_PREVIEW, &mut hovered);
     }
 
-    let clicked = if interactive && response.clicked() {
+    let clicked = if response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             children
                 .iter()
@@ -120,7 +155,7 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
 }
 
 /// The screen rect a given `child` of `parent` would occupy in `area`. Used to
-/// animate "zoom out" by growing the parent view out of the child we left.
+/// find the pivot cell when zooming out.
 pub fn child_rect(tree: &Tree, parent: NodeId, child: NodeId, area: ERect) -> Option<ERect> {
     let kids = sorted_children(tree, parent);
     let idx = kids.iter().position(|&k| k == child)?;
@@ -130,13 +165,30 @@ pub fn child_rect(tree: &Tree, parent: NodeId, child: NodeId, area: ERect) -> Op
 }
 
 /// The unchanging context threaded through the recursive cell drawing.
+#[derive(Clone, Copy)]
 struct Paint<'a> {
     painter: &'a egui::Painter,
     tree: &'a Tree,
+    /// Layout area (children are squarified into this, then mapped by `xform`).
+    area: ERect,
     xform: Xform,
+    /// Opacity multiplier for the whole view (for cross-fades).
+    alpha: f32,
     hover_pos: Option<Pos2>,
     char_w: f32,
     line_h: f32,
+}
+
+fn draw_node_children(ctx: &Paint, node: NodeId, hovered: &mut Option<Hit>) {
+    let children = sorted_children(ctx.tree, node);
+    if children.is_empty() {
+        return;
+    }
+    let weights: Vec<u64> = children.iter().map(|&id| ctx.tree.node(id).size).collect();
+    let rects = squarify(&weights, to_layout(ctx.area));
+    for (&id, rect) in children.iter().zip(&rects) {
+        draw_cell(ctx, id, *rect, NEST_PREVIEW, hovered);
+    }
 }
 
 fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Option<Hit>) {
@@ -144,26 +196,43 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     if rect.width() < MIN_CELL || rect.height() < MIN_CELL {
         return;
     }
-    let drawn = ctx.xform.apply(rect); // camera-transformed for the zoom
+    let drawn = ctx.xform.apply(rect);
     if drawn.width() < 0.5 || drawn.height() < 0.5 {
         return;
     }
 
     let node = ctx.tree.node(id);
     let color = Category::of(ctx.tree, id).color();
-    ctx.painter.rect_filled(drawn, 0, color);
-    ctx.painter
-        .rect_stroke(drawn, 0, Stroke::new(1.0, theme::BORDER), StrokeKind::Inside);
+    ctx.painter.rect_filled(drawn, 0, color.gamma_multiply(ctx.alpha));
+    ctx.painter.rect_stroke(
+        drawn,
+        0,
+        Stroke::new(1.0, theme::BORDER.gamma_multiply(ctx.alpha)),
+        StrokeKind::Inside,
+    );
+    if node.is_mountpoint() {
+        // Make subvolume / mount boundaries unmistakable.
+        ctx.painter.rect_stroke(
+            drawn,
+            0,
+            Stroke::new(2.5, theme::MOUNT.gamma_multiply(ctx.alpha)),
+            StrokeKind::Inside,
+        );
+    }
 
-    // Hit-test against the untransformed rect; the caller only consults this
-    // when no animation is running, so the two coincide then.
+    // Hit-test against the untransformed rect (only consulted when idle, where
+    // `xform` is the identity, so the two coincide).
     if let Some(p) = ctx.hover_pos {
         if rect.contains(p) {
             *hovered = Some(Hit { id, rect });
         }
     }
 
-    let label_color = theme::contrast_text(color);
+    let label_color = if node.is_mountpoint() {
+        theme::MOUNT
+    } else {
+        theme::contrast_text(color)
+    };
     let can_nest = node.kind == NodeKind::Dir
         && nest > 0
         && !node.children.is_empty()
@@ -197,10 +266,13 @@ fn draw_label(ctx: &Paint, area: ERect, name: &str, size: u64, color: Color32) {
     }
     let max_chars = (inner.width() / ctx.char_w).floor() as usize;
     let text = fit_text(name, &theme::format_size(size), max_chars);
-    let galley = ctx
-        .painter
-        .layout_no_wrap(text, FontId::monospace(LABEL_FONT), color);
-    ctx.painter.galley(inner.min, galley, color);
+    let galley = ctx.painter.layout_no_wrap(
+        text,
+        FontId::monospace(LABEL_FONT),
+        color.gamma_multiply(ctx.alpha),
+    );
+    ctx.painter
+        .galley(inner.min, galley, color.gamma_multiply(ctx.alpha));
 }
 
 /// Fit `name` (and, space permitting, its size) into `max_chars`, ellipsizing
@@ -235,31 +307,40 @@ fn to_screen(r: Rect) -> ERect {
     )
 }
 
-/// Camera transform: maps the `source` rect onto the full `area`, so a shrinking
-/// `source` zooms the view in. Identity when `source == area`.
+/// Affine map of one rectangle (`src`) onto another (`dst`). Identity when
+/// `src == dst`. A shrinking `src` zooms the view in; a shrinking `dst` shrinks
+/// the view into a cell.
 #[derive(Clone, Copy)]
 struct Xform {
-    source: ERect,
-    area: ERect,
+    src: ERect,
+    dst: ERect,
 }
 
 impl Xform {
     fn identity(area: ERect) -> Self {
-        Xform { source: area, area }
+        Xform { src: area, dst: area }
     }
 
     fn apply(&self, r: ERect) -> ERect {
-        if self.source.width() <= 0.0 || self.source.height() <= 0.0 {
+        if self.src.width() <= 0.0 || self.src.height() <= 0.0 {
             return r;
         }
-        let sx = self.area.width() / self.source.width();
-        let sy = self.area.height() / self.source.height();
+        let sx = self.dst.width() / self.src.width();
+        let sy = self.dst.height() / self.src.height();
         ERect::from_min_size(
             Pos2::new(
-                self.area.min.x + (r.min.x - self.source.min.x) * sx,
-                self.area.min.y + (r.min.y - self.source.min.y) * sy,
+                self.dst.min.x + (r.min.x - self.src.min.x) * sx,
+                self.dst.min.y + (r.min.y - self.src.min.y) * sy,
             ),
             Vec2::new(r.width() * sx, r.height() * sy),
         )
     }
+}
+
+fn lerp_rect(a: ERect, b: ERect, t: f32) -> ERect {
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    ERect::from_min_max(
+        Pos2::new(lerp(a.min.x, b.min.x), lerp(a.min.y, b.min.y)),
+        Pos2::new(lerp(a.max.x, b.max.x), lerp(a.max.y, b.max.y)),
+    )
 }

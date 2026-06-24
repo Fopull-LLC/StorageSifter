@@ -30,7 +30,9 @@ impl Scan {
         let (tx, rx) = mpsc::channel();
         let path = path.to_path_buf();
         thread::spawn(move || {
-            let result = scanner::scan(&path).map_err(|e| e.to_string());
+            // Whole physical filesystem, crossing btrfs subvolumes / same-device
+            // mounts (so picking a device shows everything on it).
+            let result = scanner::scan_filesystem(&path).map_err(|e| e.to_string());
             // The receiver may already be gone (e.g. a rescan superseded us);
             // dropping the result then is fine.
             let _ = tx.send(result);

@@ -15,6 +15,7 @@ pub const BORDER: Color32 = Color32::from_rgb(0x0d, 0x0f, 0x13); // hard cell ed
 pub const TEXT: Color32 = Color32::from_rgb(0xc8, 0xcd, 0xd6);
 pub const TEXT_DIM: Color32 = Color32::from_rgb(0x7a, 0x82, 0x90);
 pub const ACCENT: Color32 = Color32::from_rgb(0xe5, 0xc0, 0x7b); // hover / selection
+pub const MOUNT: Color32 = Color32::from_rgb(0x6f, 0xd0, 0xe8); // mount / subvolume edge
 
 /// Install the dark theme into the egui context.
 pub fn apply(ctx: &egui::Context) {

@@ -1,10 +1,11 @@
 //! StorageSifter — desktop disk-usage treemap.
 //!
-//! Phase 3: a static squarified treemap of a scanned directory, rendered on the
-//! wgpu backend with the dark theme. Scanning runs on a background thread and
-//! the view fills in when it completes. Drill-down and animation come in Phase 4.
+//! An interactive squarified treemap of a scanned filesystem, rendered on the
+//! wgpu backend. Launch with no argument to pick a device; pass a `PATH` to scan
+//! it directly. Scanning runs on a background thread and the view fills in when
+//! it completes.
 //!
-//! Usage: `storagesifter [PATH]` (defaults to $HOME).
+//! Usage: `storagesifter [PATH]`
 
 mod app;
 mod scan;
@@ -16,11 +17,8 @@ use std::path::PathBuf;
 use eframe::egui;
 
 fn main() -> eframe::Result<()> {
-    let path = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("."));
+    // A path argument scans directly; with none, the device picker is shown.
+    let path = std::env::args_os().nth(1).map(PathBuf::from);
 
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
