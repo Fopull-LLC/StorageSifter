@@ -15,10 +15,11 @@
 //!
 //! The total reported by [`scan`] matches `du -xsB1 <path>` byte-for-byte.
 
+mod mounts;
 mod tree;
 mod walk;
 
 pub mod safety;
 
 pub use tree::{Node, NodeFlags, NodeId, NodeKind, Tree};
-pub use walk::scan;
+pub use walk::{scan, scan_filesystem};

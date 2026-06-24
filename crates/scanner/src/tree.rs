@@ -41,6 +41,9 @@ impl NodeFlags {
     /// A hard link whose bytes were attributed to an earlier-seen link, so this
     /// node's `size` is 0 even though `own_size` is the real size.
     pub const DEDUPED: u8 = 1 << 2;
+    /// This entry sits at a mount / subvolume boundary (its device differs from
+    /// its parent's). The UI flags these so the separation is obvious.
+    pub const MOUNTPOINT: u8 = 1 << 3;
 
     #[inline]
     pub fn contains(self, bit: u8) -> bool {
@@ -79,6 +82,12 @@ impl Node {
     #[inline]
     pub fn is_hardlinked(&self) -> bool {
         self.flags.contains(NodeFlags::HARDLINKED)
+    }
+
+    /// `true` if this entry sits at a mount / subvolume boundary.
+    #[inline]
+    pub fn is_mountpoint(&self) -> bool {
+        self.flags.contains(NodeFlags::MOUNTPOINT)
     }
 }
 

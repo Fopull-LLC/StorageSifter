@@ -37,24 +37,36 @@ struct Raw {
     own_size: u64,
     /// Set when this directory could not be read.
     unreadable: bool,
+    /// Set when this entry's device differs from its parent's — a mount /
+    /// subvolume boundary.
+    is_mount: bool,
     children: Vec<Raw>,
 }
 
-/// Scan `root` and return the arena tree. Stays on the filesystem that `root`
-/// lives on. Returns an error only if `root` itself cannot be `lstat`-ed.
+/// Scan `root`, staying on the single filesystem `root` lives on (matches
+/// `du -x`). Returns an error only if `root` itself cannot be `lstat`-ed.
 pub fn scan(root: &Path) -> io::Result<Tree> {
     let meta = fs::symlink_metadata(root)?;
-    let root_dev = meta.dev();
-    scan_with_root_dev(root, root_dev)
+    let mut allowed = FxHashSet::default();
+    allowed.insert(meta.dev());
+    scan_with_allowed(root, allowed)
 }
 
-/// Like [`scan`], but with an explicit `root_dev`. Exposed within the crate so
-/// tests can force a mismatching device and assert the single-filesystem guard
-/// prunes every child.
-pub(crate) fn scan_with_root_dev(root: &Path, root_dev: u64) -> io::Result<Tree> {
+/// Like [`scan`], but follows the whole physical filesystem `root` lives on,
+/// crossing into sibling subvolumes / bind mounts on the same source device
+/// (e.g. btrfs `/home`, `/var`). Genuinely different drives are still pruned.
+pub fn scan_filesystem(root: &Path) -> io::Result<Tree> {
+    fs::symlink_metadata(root)?; // surface a clear error if `root` is unreadable
+    let allowed = crate::mounts::same_filesystem_devices(root);
+    scan_with_allowed(root, allowed)
+}
+
+/// Scan `root`, descending into any child whose device is in `allowed`. Exposed
+/// within the crate so tests can control exactly which devices are crossed.
+pub(crate) fn scan_with_allowed(root: &Path, allowed: FxHashSet<u64>) -> io::Result<Tree> {
     let meta = fs::symlink_metadata(root)?;
-    let raw = build(root.to_path_buf(), &meta, root_dev);
-    Ok(flatten(raw, root, root_dev))
+    let raw = build(root.to_path_buf(), &meta, &allowed);
+    Ok(flatten(raw, root, meta.dev()))
 }
 
 fn kind_of(meta: &fs::Metadata) -> NodeKind {
@@ -72,9 +84,10 @@ fn kind_of(meta: &fs::Metadata) -> NodeKind {
 
 /// Recursively build the `Raw` subtree rooted at `path`. `meta` is the result of
 /// `lstat(path)`, already obtained by the caller. Directory children are read
-/// and `lstat`-ed, those on a foreign device are pruned, and the survivors are
-/// recursed into in parallel.
-fn build(path: PathBuf, meta: &fs::Metadata, root_dev: u64) -> Raw {
+/// and `lstat`-ed; children on a device not in `allowed` are pruned, and the
+/// survivors are recursed into in parallel. A child whose device differs from
+/// its parent's just crossed a mount/subvolume boundary and is flagged.
+fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>) -> Raw {
     let own_size = meta.blocks() * 512;
     let name = path
         .file_name()
@@ -89,6 +102,7 @@ fn build(path: PathBuf, meta: &fs::Metadata, root_dev: u64) -> Raw {
         nlink: meta.nlink(),
         own_size,
         unreadable,
+        is_mount: false,
         children,
     };
 
@@ -122,17 +136,23 @@ fn build(path: PathBuf, meta: &fs::Metadata, root_dev: u64) -> Raw {
                 continue;
             }
         };
-        // Single-filesystem guard: skip anything that crosses onto another
-        // device (mount points, bind mounts), matching `du -x`.
-        if child_meta.dev() != root_dev {
+        // Stay within the allowed device set (one filesystem, or one physical
+        // filesystem including its subvolumes — see `scan` vs `scan_filesystem`).
+        if !allowed.contains(&child_meta.dev()) {
             continue;
         }
         kids.push((child_path, child_meta));
     }
 
+    let parent_dev = meta.dev();
     let children: Vec<Raw> = kids
         .into_par_iter()
-        .map(|(p, m)| build(p, &m, root_dev))
+        .map(|(p, m)| {
+            let is_mount = m.dev() != parent_dev;
+            let mut child = build(p, &m, allowed);
+            child.is_mount = is_mount;
+            child
+        })
         .collect();
 
     leaf(unreadable, NodeKind::Dir, children)
@@ -168,6 +188,9 @@ fn flatten(raw: Raw, root_path: &Path, root_dev: u64) -> Tree {
         let mut counted = r.own_size;
         if r.unreadable {
             flags.insert(NodeFlags::UNREADABLE);
+        }
+        if r.is_mount {
+            flags.insert(NodeFlags::MOUNTPOINT);
         }
         let is_file_like = r.kind != NodeKind::Dir;
         if is_file_like && r.nlink > 1 {
@@ -228,16 +251,18 @@ mod tests {
 
         let real_dev = fs::symlink_metadata(root).unwrap().dev();
 
-        // Correct device: children are present.
-        let ok = scan_with_root_dev(root, real_dev).unwrap();
+        // Correct device allowed: children are present.
+        let mut real = FxHashSet::default();
+        real.insert(real_dev);
+        let ok = scan_with_allowed(root, real).unwrap();
         assert!(ok.len() > 1, "real device should include children");
 
-        // Pretend the root lives on a different device than its contents. Every
-        // child then crosses a (simulated) filesystem boundary and must be
-        // pruned, leaving just the root node — exactly what `du -x` does at a
-        // mount point.
-        let wrong_dev = real_dev.wrapping_add(1);
-        let pruned = scan_with_root_dev(root, wrong_dev).unwrap();
+        // Only a foreign device allowed: every child crosses a (simulated)
+        // boundary and is pruned, leaving just the root node — exactly what
+        // `du -x` does at a mount point.
+        let mut wrong = FxHashSet::default();
+        wrong.insert(real_dev.wrapping_add(1));
+        let pruned = scan_with_allowed(root, wrong).unwrap();
         assert_eq!(pruned.len(), 1, "all foreign-device children pruned");
         assert_eq!(pruned.root, 0);
     }
