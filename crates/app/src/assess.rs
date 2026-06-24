@@ -101,7 +101,13 @@ const PROJECT_MARKERS: &[&str] = &[
 pub fn assess(tree: &Tree, id: NodeId, home: &Path) -> Assessment {
     let node = tree.node(id);
     let path = tree.path(id);
-    let lower = tree.name(id).to_ascii_lowercase();
+    // Use the path's basename, not the raw node name: the scanner stores the
+    // full scanned path as the *root* node's name, which would defeat the
+    // name-based rules below if the root itself is ever assessed.
+    let lower = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
     let class = classify(&path, home);
     let category = Category::of(tree, id);
     let is_dir = node.kind == NodeKind::Dir;
@@ -137,6 +143,30 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path) -> Assessment {
             points,
         );
     }
+    // --- Caches / build output / temp: the space is reclaimable. This is
+    // checked *before* the bare system-location case below, because a
+    // system-managed cache (e.g. /var/cache) is still a cache — but it should
+    // be cleared through the package manager, not deleted by hand, so it gets
+    // its own framing rather than being mislabeled "installed software".
+    if category == Category::Junk {
+        if class == Class::System {
+            points.push(Point::good("Cache / regenerated data — the space is reclaimable"));
+            points.push(Point::bad(
+                "System-managed — clearing it by hand usually needs root",
+            ));
+            return finish(
+                Verdict::Likely,
+                "System cache",
+                "This is cache the system rebuilds on demand, so the space is reclaimable — but it sits in a system location. Prefer your package manager's clean command (on Arch / CachyOS, `paccache -r` or `pacman -Sc` clears the package cache) rather than deleting these files by hand.",
+                points,
+            );
+        }
+        let (headline, detail) = junk_kind(&lower);
+        points.push(Point::good("Regenerated automatically when it's next needed"));
+        return finish(Verdict::Safe, headline, detail, points);
+    }
+
+    // --- Other system files: the OS itself or installed software.
     if class == Class::System {
         points.push(Point::bad("Part of the OS or an installed program"));
         return finish(
@@ -145,13 +175,6 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path) -> Assessment {
             "Likely belongs to installed software. Remove programs through your package manager rather than deleting files here.",
             points,
         );
-    }
-
-    // --- Clearly reclaimable: caches, build output, temp.
-    if category == Category::Junk {
-        let (headline, detail) = junk_kind(&lower);
-        points.push(Point::good("Regenerated automatically when it's next needed"));
-        return finish(Verdict::Safe, headline, detail, points);
     }
 
     // --- Things people usually want to keep.
