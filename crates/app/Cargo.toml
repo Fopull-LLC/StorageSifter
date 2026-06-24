@@ -15,3 +15,5 @@ path = "src/main.rs"
 # egui + the wgpu (Vulkan) backend. glow is disabled; wayland + x11 cover the
 # Linux session types. egui itself is re-exported as `eframe::egui`.
 eframe = { version = "=0.34.3", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
+scanner = { path = "../scanner" }
+treemap = { path = "../treemap" }

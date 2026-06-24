@@ -1,12 +1,27 @@
 //! StorageSifter — desktop disk-usage treemap.
 //!
-//! Phase 0: an empty, dark, GPU-backed (wgpu) window that confirms the UI
-//! toolchain is wired up end to end. The scanning UI, treemap rendering, and
-//! drill-down interactions arrive in later phases.
+//! Phase 3: a static squarified treemap of a scanned directory, rendered on the
+//! wgpu backend with the dark theme. Scanning runs on a background thread and
+//! the view fills in when it completes. Drill-down and animation come in Phase 4.
+//!
+//! Usage: `storagesifter [PATH]` (defaults to $HOME).
+
+mod app;
+mod scan;
+mod theme;
+mod treemap_view;
+
+use std::path::PathBuf;
 
 use eframe::egui;
 
 fn main() -> eframe::Result<()> {
+    let path = std::env::args_os()
+        .nth(1)
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .unwrap_or_else(|| PathBuf::from("."));
+
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
@@ -19,23 +34,9 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "StorageSifter",
         options,
-        Box::new(|cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::<StorageSifter>::default())
+        Box::new(move |cc| {
+            theme::apply(&cc.egui_ctx);
+            Ok(Box::new(app::StorageSifterApp::new(path)))
         }),
     )
-}
-
-#[derive(Default)]
-struct StorageSifter;
-
-impl eframe::App for StorageSifter {
-    // eframe 0.34 sets up the central panel for us and hands over its `Ui`.
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(ui.available_height() * 0.4);
-            ui.heading("StorageSifter");
-            ui.label("Phase 0 — scaffold online. The treemap arrives in Phase 3.");
-        });
-    }
 }

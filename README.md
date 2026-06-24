@@ -5,8 +5,9 @@ A fast, lightweight disk-usage visualizer for Linux. It maps a filesystem as a
 consume — so the biggest space hogs are obvious at a glance. Think SpaceSniffer,
 but native, GPU-accelerated, and built for a single Linux machine.
 
-> Status: early development. Phase 0 (scaffold) and Phase 1 (scanning engine)
-> are in place. The treemap UI lands in later phases.
+> Status: early development. Phases 0–3 are in place — the scanning engine, the
+> squarified layout, and a static treemap UI that renders a scanned directory.
+> Drill-down, animation, and file operations come next.
 
 ## Architecture
 
@@ -59,6 +60,17 @@ Requires a Rust toolchain (install via [rustup](https://rustup.rs)).
 cargo build --release          # build everything
 cargo test  -p scanner         # run the scanner's correctness tests
 ```
+
+## Running the visualizer
+
+```sh
+cargo run --release -p app -- [PATH]    # treemap of PATH (defaults to $HOME)
+```
+
+A dark, GPU-rendered window opens and a background scan fills in a squarified
+treemap of the directory: cells sized by on-disk usage, colored by file
+category, with one level of nested preview inside each folder. Hover a cell to
+see its full path and size in the status bar; use **Rescan** to refresh.
 
 ## Phase 1: the scanning engine
 
