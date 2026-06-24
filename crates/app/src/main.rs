@@ -8,6 +8,7 @@
 //! Usage: `storagesifter [PATH]`
 
 mod app;
+mod assess;
 mod ops;
 mod scan;
 mod settings;

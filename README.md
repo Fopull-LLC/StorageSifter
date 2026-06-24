@@ -90,10 +90,17 @@ archives pink. One level of nested preview is drawn inside each folder.
   directly still stays on its single filesystem, matching `du -x`.)
 - **Ctrl/Shift-click** cells to build a multi-selection; a bar shows the count
   and total reclaimable size, with **Move to Trash / Delete / Clear**.
-- **Right-click** any cell for **Properties**, **Reveal in file manager**, or to
-  delete. The trash is the default (reversible); every delete is confirmed, and
-  permanent deletes — or anything outside your home directory — are flagged in
-  the dialog. Protected system roots are refused outright.
+- **Right-click** any cell for **Safe to delete?**, **Properties**, **Reveal in
+  file manager**, or to delete. The trash is the default (reversible); every
+  delete is confirmed, and permanent deletes — or anything outside your home
+  directory — are flagged in the dialog. Protected system roots are refused
+  outright.
+- **Safe to delete?** opens an instant report that tells you *what a file or
+  folder actually is* — a cache, build output, version-control history, personal
+  media, installed software, a code project, credentials — and gives a plain
+  verdict (*Safe to delete* → *Don't delete*) with the reasons behind it. It
+  reads only the already-scanned, in-memory tree (no re-scan, no disk reads, no
+  network) and is computed once, so it never slows the app down.
 - **Keyboard**: `Delete` trashes the selection, `Shift+Delete` deletes it
   permanently, `Ctrl+A` selects everything in view, `Esc` clears the selection,
   `Backspace` goes up, `F5` rescans. All bindings are **configurable in ⚙

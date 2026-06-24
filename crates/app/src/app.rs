@@ -8,6 +8,7 @@ use eframe::egui::{self, Rect as ERect};
 use scanner::safety::{classify, Class};
 use scanner::{NodeId, NodeKind, Tree};
 
+use crate::assess::{self, Assessment};
 use crate::ops;
 use crate::scan::Scan;
 use crate::settings::{Action, Keybind, Settings};
@@ -61,15 +62,26 @@ struct AnimState {
 enum Dialog {
     None,
     Properties(NodeId),
+    Assess { id: NodeId, report: Assessment },
     Confirm { ids: Vec<NodeId>, permanent: bool },
     Settings,
 }
 
 enum MenuAction {
+    Assess(NodeId),
     Properties(NodeId),
     Reveal(NodeId),
     Trash(Vec<NodeId>),
     Delete(Vec<NodeId>),
+}
+
+/// What the "Safe to delete?" report dialog returned this frame.
+#[derive(Clone, Copy)]
+enum AssessOutcome {
+    Open,
+    Close,
+    Trash,
+    Delete,
 }
 
 #[derive(Clone, Copy)]
@@ -540,6 +552,12 @@ impl StorageSifterApp {
                 }
             });
             match menu_action {
+                Some(MenuAction::Assess(id)) => {
+                    // Computed once, here — the report is then cached in the
+                    // dialog and never recomputed per frame.
+                    let report = assess::assess(tree, id, &self.home);
+                    self.dialog = Dialog::Assess { id, report };
+                }
                 Some(MenuAction::Properties(id)) => self.dialog = Dialog::Properties(id),
                 Some(MenuAction::Reveal(id)) => ops::reveal(&tree.path(id)),
                 Some(MenuAction::Trash(ids)) => match prepare_delete(tree, &self.home, ids, false) {
@@ -566,6 +584,22 @@ impl StorageSifterApp {
             Dialog::Properties(id) => {
                 if self.show_properties(ctx, id) {
                     self.dialog = Dialog::Properties(id);
+                }
+            }
+            Dialog::Assess { id, report } => {
+                let outcome = self.show_assess(ctx, id, &report);
+                match outcome {
+                    AssessOutcome::Open => self.dialog = Dialog::Assess { id, report },
+                    AssessOutcome::Close => {}
+                    AssessOutcome::Trash | AssessOutcome::Delete => {
+                        let permanent = matches!(outcome, AssessOutcome::Delete);
+                        if let Some(Scan::Done { tree, .. }) = self.scan.as_ref() {
+                            match prepare_delete(tree, &self.home, vec![id], permanent) {
+                                Ok(dialog) => self.dialog = dialog,
+                                Err(msg) => self.status = Some(msg),
+                            }
+                        }
+                    }
                 }
             }
             Dialog::Confirm { ids, permanent } => match self.show_confirm(ctx, &ids, permanent) {
@@ -628,6 +662,83 @@ impl StorageSifterApp {
             keep = false;
         }
         keep
+    }
+
+    /// The "Safe to delete?" report. `report` is precomputed and merely
+    /// rendered here, so this stays cheap on every frame the modal is open.
+    fn show_assess(&self, ctx: &egui::Context, id: NodeId, report: &Assessment) -> AssessOutcome {
+        let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
+            return AssessOutcome::Close;
+        };
+        let node = tree.node(id);
+        let path = tree.path(id);
+        let meta = if node.kind == NodeKind::Dir {
+            format!("{}  ·  {} items", format_size(node.size), node.children.len())
+        } else {
+            format!("{}  ·  file", format_size(node.size))
+        };
+
+        let mut outcome = AssessOutcome::Open;
+        let response = egui::Modal::new(egui::Id::new("assess")).show(ctx, |ui| {
+            ui.set_width(540.0);
+
+            // Verdict badge + what-it-is headline.
+            ui.heading(
+                egui::RichText::new(report.verdict.label()).color(report.verdict.color()),
+            );
+            ui.label(
+                egui::RichText::new(&report.headline)
+                    .strong()
+                    .color(theme::TEXT),
+            );
+            ui.add_space(6.0);
+            ui.monospace(path.display().to_string());
+            ui.label(egui::RichText::new(meta).color(theme::TEXT_DIM));
+
+            ui.add_space(10.0);
+            ui.label(&report.detail);
+
+            if !report.points.is_empty() {
+                ui.add_space(10.0);
+                for p in &report.points {
+                    let (mark, color) = if p.good {
+                        ("✔", assess::Verdict::Safe.color())
+                    } else {
+                        ("⚠", assess::Verdict::Caution.color())
+                    };
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.label(egui::RichText::new(mark).color(color));
+                        ui.label(egui::RichText::new(&p.text).color(theme::TEXT));
+                    });
+                }
+            }
+
+            ui.add_space(14.0);
+            ui.separator();
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if ui.button("Move to Trash").clicked() {
+                    outcome = AssessOutcome::Trash;
+                }
+                let del = egui::Button::new(
+                    egui::RichText::new("Delete permanently…").color(egui::Color32::WHITE),
+                )
+                .fill(theme::DANGER);
+                if ui.add(del).clicked() {
+                    outcome = AssessOutcome::Delete;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        outcome = AssessOutcome::Close;
+                    }
+                });
+            });
+        });
+        if response.should_close() && matches!(outcome, AssessOutcome::Open) {
+            outcome = AssessOutcome::Close;
+        }
+        outcome
     }
 
     fn show_confirm(&self, ctx: &egui::Context, ids: &[NodeId], permanent: bool) -> Confirm {
@@ -894,6 +1005,13 @@ fn context_menu_items(
     let mut action = None;
     ui.label(egui::RichText::new(tree.name(target)).strong());
     ui.separator();
+    if ui
+        .button(egui::RichText::new("Safe to delete?").color(theme::MOUNT))
+        .clicked()
+    {
+        action = Some(MenuAction::Assess(target));
+        ui.close();
+    }
     if ui.button("Properties").clicked() {
         action = Some(MenuAction::Properties(target));
         ui.close();
