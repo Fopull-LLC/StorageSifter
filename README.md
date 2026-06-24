@@ -68,8 +68,11 @@ cargo run -p app -- [PATH]    # treemap of PATH (defaults to $HOME)
 ```
 
 A dark, GPU-rendered window opens and a background scan fills in a squarified
-treemap: cells sized by on-disk usage, colored by file category, with one level
-of nested preview inside each folder.
+treemap: cells sized by on-disk usage and **colored by what they are** — caches
+and build artifacts (`target/`, `node_modules/`, `.cache/`, `__pycache__`, …)
+and everything inside them glow **amber** so reclaimable space stands out at a
+glance, with media green, applications cyan, code blue, documents yellow, and
+archives pink. One level of nested preview is drawn inside each folder.
 
 - **Click** a folder to drill into it — the view zooms in, growing out of the
   cell you clicked.

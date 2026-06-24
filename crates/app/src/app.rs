@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use eframe::egui::{self, Rect as ERect};
+use eframe::egui::{self, Pos2, Rect as ERect};
 use scanner::{NodeId, NodeKind, Tree};
 
 use crate::scan::Scan;
@@ -35,10 +35,16 @@ pub struct StorageSifterApp {
 
 #[derive(Clone, Copy)]
 struct AnimState {
-    /// Screen rect the new view grows out of.
-    focal: ERect,
-    /// `egui` time (seconds) when the zoom began.
-    start: f64,
+    /// Camera `source` rect at the start of the zoom.
+    from: ERect,
+    /// Camera `source` rect at the end of the zoom.
+    to: ERect,
+    /// `egui` time when the first frame rendered; stamped lazily so the zoom
+    /// always begins at t = 0 no matter when it was queued.
+    start: Option<f64>,
+    /// Node to switch to when the zoom finishes (drill-in). `None` for zoom-out,
+    /// where `current` is already the destination.
+    commit: Option<NodeId>,
 }
 
 impl StorageSifterApp {
@@ -142,12 +148,17 @@ impl StorageSifterApp {
         }
 
         if let Some(target) = jump {
-            let now = ui.ctx().input(|i| i.time);
-            let focal = focal_up(tree, self.current, target, self.last_area)
+            // Zoom out of the cell we're leaving (inlined rather than a &mut self
+            // method because `tree` borrows `self.scan`).
+            let from = focal_up(tree, self.current, target, self.last_area)
                 .unwrap_or_else(|| fallback_focal(self.last_area));
-            // Inlined (not a &mut self method) because `tree` borrows `self.scan`.
             self.current = target;
-            self.anim = Some(AnimState { focal, start: now });
+            self.anim = Some(AnimState {
+                from,
+                to: self.last_area,
+                start: None,
+                commit: None,
+            });
             self.hovered = None;
         }
     }
@@ -163,6 +174,8 @@ impl StorageSifterApp {
                         egui::RichText::new(format!("·  {}", format_size(node.size)))
                             .color(theme::TEXT_DIM),
                     );
+                    let cat = theme::Category::of(tree, id);
+                    ui.label(egui::RichText::new(format!("·  {}", cat.label())).color(cat.color()));
                     if node.is_hardlinked() {
                         ui.label(egui::RichText::new("·  hardlinked").color(theme::ACCENT));
                     }
@@ -188,8 +201,11 @@ impl StorageSifterApp {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Scan::Done { tree, .. } = &self.scan else {
                 let msg = match &self.scan {
+                    Scan::Running { started, .. } => {
+                        format!("Scanning…  {:.1}s", started.elapsed().as_secs_f64())
+                    }
                     Scan::Error(e) => format!("Scan failed:\n{e}"),
-                    _ => "Scanning…".to_owned(),
+                    Scan::Done { .. } => String::new(),
                 };
                 center_message(ui, &msg);
                 return;
@@ -197,42 +213,57 @@ impl StorageSifterApp {
 
             let now = ui.ctx().input(|i| i.time);
 
-            // Keyboard: go up a level.
+            // Keyboard: go up a level (zoom out of the child we leave).
             let go_up = ui
                 .ctx()
                 .input(|i| i.key_pressed(egui::Key::Backspace) || i.key_pressed(egui::Key::Escape));
             if go_up && self.anim.is_none() {
                 if let Some(parent) = tree.node(self.current).parent {
-                    let focal = focal_up(tree, self.current, parent, self.last_area)
+                    let from = focal_up(tree, self.current, parent, self.last_area)
                         .unwrap_or_else(|| fallback_focal(self.last_area));
                     self.current = parent;
-                    self.anim = Some(AnimState { focal, start: now });
+                    self.anim = Some(AnimState {
+                        from,
+                        to: self.last_area,
+                        start: None,
+                        commit: None,
+                    });
                 }
             }
 
-            // Expire a finished zoom.
-            if let Some(a) = self.anim {
-                if now - a.start >= ANIM_SECS {
-                    self.anim = None;
+            // Advance the camera; commit + clear when the zoom finishes.
+            let anim = if let Some(a) = &mut self.anim {
+                let start = *a.start.get_or_insert(now);
+                let t = (now - start) / ANIM_SECS;
+                if t >= 1.0 {
+                    None
+                } else {
+                    let source = lerp_rect(a.from, a.to, ease_out_cubic(t as f32));
+                    Some(treemap_view::Anim { source })
                 }
+            } else {
+                None
+            };
+            if self.anim.is_some() && anim.is_none() {
+                if let Some(commit) = self.anim.and_then(|a| a.commit) {
+                    self.current = commit;
+                }
+                self.anim = None;
             }
-            let anim = self.anim.map(|a| treemap_view::Anim {
-                focal: a.focal,
-                t: (((now - a.start) / ANIM_SECS) as f32).clamp(0.0, 1.0),
-            });
 
             let it = treemap_view::show(ui, tree, self.current, anim);
             self.last_area = it.area;
             self.hovered = it.hovered.map(|h| h.id);
 
-            // Drill into the clicked folder (one level per click).
+            // Drill into the clicked folder: zoom into it, then commit at the end.
             if let Some(hit) = it.clicked {
                 let node = tree.node(hit.id);
                 if node.kind == NodeKind::Dir && !node.children.is_empty() {
-                    self.current = hit.id;
                     self.anim = Some(AnimState {
-                        focal: hit.rect,
-                        start: now,
+                        from: it.area,
+                        to: hit.rect,
+                        start: None,
+                        commit: Some(hit.id),
                     });
                 }
             }
@@ -259,6 +290,19 @@ fn focal_up(tree: &Tree, from: NodeId, target: NodeId, area: ERect) -> Option<ER
 
 fn fallback_focal(area: ERect) -> ERect {
     ERect::from_center_size(area.center(), area.size() * 0.25)
+}
+
+fn ease_out_cubic(t: f32) -> f32 {
+    let u = 1.0 - t.clamp(0.0, 1.0);
+    1.0 - u * u * u
+}
+
+fn lerp_rect(a: ERect, b: ERect, t: f32) -> ERect {
+    let lerp = |x: f32, y: f32| x + (y - x) * t;
+    ERect::from_min_max(
+        Pos2::new(lerp(a.min.x, b.min.x), lerp(a.min.y, b.min.y)),
+        Pos2::new(lerp(a.max.x, b.max.x), lerp(a.max.y, b.max.y)),
+    )
 }
 
 fn segment_label(tree: &Tree, id: NodeId) -> String {

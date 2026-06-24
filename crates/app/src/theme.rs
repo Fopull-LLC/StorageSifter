@@ -1,5 +1,9 @@
-//! Visual theme: a dark, flat, programmer palette plus file-category colors and
-//! human-readable size formatting.
+//! Visual theme: a dark, flat, programmer palette plus *semantic* file-category
+//! colors and human-readable size formatting.
+//!
+//! The categories are chosen to answer the question "what is taking up my
+//! space, and is it junk?" at a glance — caches and build artifacts get a loud
+//! amber, media a calm green, applications cyan, and so on.
 
 use eframe::egui::{self, Color32};
 use scanner::{NodeId, NodeKind, Tree};
@@ -22,25 +26,70 @@ pub fn apply(ctx: &egui::Context) {
     ctx.set_visuals(visuals);
 }
 
-/// Broad file categories, colored so the disk is readable at a glance.
+/// A "what is this" classification, tuned to surface reclaimable space.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Category {
-    Dir,
-    Code,
-    Image,
-    Video,
-    Audio,
+    /// Caches, build artifacts, temp files — the usual reclaimable garbage.
+    Junk,
+    /// Video / audio / images — usually large and usually wanted.
+    Media,
+    /// Archives and disk images.
     Archive,
+    /// Applications, installers, libraries, executables.
+    App,
+    /// Source code and config.
+    Code,
+    /// Documents and text.
     Document,
-    Binary,
+    /// A plain folder (nothing more specific).
+    Folder,
+    /// Anything else.
     Other,
 }
 
+/// Directory names that are almost always reclaimable caches / build output.
+const JUNK_DIRS: &[&str] = &[
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    "out",
+    ".cache",
+    "cache",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".gradle",
+    ".ccache",
+    ".npm",
+    ".yarn",
+    ".venv",
+    "venv",
+    ".next",
+    ".nuxt",
+    "cmakefiles",
+    ".tox",
+    "gpucache",
+    "shadercache",
+];
+
 impl Category {
-    /// Classify a node by kind, then by file extension.
+    /// Classify a node by kind, then by name / extension.
+    ///
+    /// Junk propagates: anything *inside* a known cache/build directory is junk
+    /// too, so a whole `target/` or `node_modules/` reads as one solid amber
+    /// block — the reclaimable space you're hunting for.
     pub fn of(tree: &Tree, id: NodeId) -> Category {
+        let mut ancestor = Some(id);
+        while let Some(node) = ancestor {
+            if tree.node(node).kind == NodeKind::Dir && is_junk_dir(tree.name(node)) {
+                return Category::Junk;
+            }
+            ancestor = tree.node(node).parent;
+        }
+
         if tree.node(id).kind == NodeKind::Dir {
-            return Category::Dir;
+            return Category::Folder;
         }
         let ext = tree
             .name(id)
@@ -48,38 +97,60 @@ impl Category {
             .map(|(_, e)| e.to_ascii_lowercase())
             .unwrap_or_default();
         match ext.as_str() {
-            "rs" | "c" | "h" | "cpp" | "hpp" | "py" | "js" | "ts" | "go" | "java" | "sh"
-            | "toml" | "json" | "lock" | "yaml" | "yml" | "md" | "html" | "css" => Category::Code,
-            "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" | "tiff" => {
-                Category::Image
+            "tmp" | "temp" | "log" | "bak" | "swp" | "swo" | "old" | "part" | "crdownload"
+            | "pyc" | "pyo" | "class" | "o" | "obj" => Category::Junk,
+            "mp4" | "mkv" | "webm" | "avi" | "mov" | "wmv" | "flv" | "m4v" | "mp3" | "flac"
+            | "wav" | "ogg" | "opus" | "m4a" | "aac" | "png" | "jpg" | "jpeg" | "gif" | "webp"
+            | "bmp" | "tiff" | "svg" | "heic" | "raw" | "cr2" | "nef" | "psd" => Category::Media,
+            "zip" | "tar" | "gz" | "xz" | "zst" | "bz2" | "7z" | "rar" | "iso" | "dmg" => {
+                Category::Archive
             }
-            "mp4" | "mkv" | "webm" | "avi" | "mov" | "flv" | "wmv" => Category::Video,
-            "mp3" | "flac" | "wav" | "ogg" | "opus" | "m4a" | "aac" => Category::Audio,
-            "zip" | "gz" | "xz" | "zst" | "bz2" | "tar" | "7z" | "rar" | "pkg" => Category::Archive,
-            "pdf" | "txt" | "doc" | "docx" | "odt" | "epub" | "csv" | "xlsx" => Category::Document,
-            "so" | "o" | "a" | "bin" | "exe" | "dll" | "wasm" | "rlib" => Category::Binary,
+            "exe" | "msi" | "appimage" | "deb" | "rpm" | "pkg" | "flatpak" | "snap" | "so"
+            | "dll" | "dylib" | "bin" | "elf" | "a" | "ko" | "wasm" | "rlib" => Category::App,
+            "rs" | "c" | "h" | "cpp" | "hpp" | "cc" | "py" | "js" | "jsx" | "ts" | "tsx" | "go"
+            | "java" | "kt" | "rb" | "php" | "html" | "css" | "scss" | "json" | "toml" | "yaml"
+            | "yml" | "xml" | "sh" | "bash" | "lua" | "sql" | "vue" | "svelte" => Category::Code,
+            "pdf" | "doc" | "docx" | "odt" | "ods" | "odp" | "txt" | "md" | "rtf" | "epub"
+            | "mobi" | "csv" | "xlsx" | "pptx" | "tex" => Category::Document,
             _ => Category::Other,
         }
     }
 
     pub fn color(self) -> Color32 {
         match self {
-            Category::Dir => Color32::from_rgb(0x39, 0x46, 0x5e),
-            Category::Code => Color32::from_rgb(0x61, 0xaf, 0xef),
-            Category::Image => Color32::from_rgb(0x98, 0xc3, 0x79),
-            Category::Video => Color32::from_rgb(0xc6, 0x78, 0xdd),
-            Category::Audio => Color32::from_rgb(0x56, 0xb6, 0xc2),
-            Category::Archive => Color32::from_rgb(0xe0, 0x6c, 0x75),
-            Category::Document => Color32::from_rgb(0xe5, 0xc0, 0x7b),
-            Category::Binary => Color32::from_rgb(0xd1, 0x9a, 0x66),
-            Category::Other => Color32::from_rgb(0x55, 0x5c, 0x69),
+            Category::Junk => Color32::from_rgb(0xd1, 0x88, 0x3c), // amber — reclaimable
+            Category::Media => Color32::from_rgb(0x9e, 0xce, 0x6a), // green
+            Category::Archive => Color32::from_rgb(0xd1, 0x7f, 0xb0), // pink
+            Category::App => Color32::from_rgb(0x56, 0xb6, 0xc2),  // cyan
+            Category::Code => Color32::from_rgb(0x61, 0xaf, 0xef), // blue
+            Category::Document => Color32::from_rgb(0xe5, 0xc0, 0x7b), // yellow
+            Category::Folder => Color32::from_rgb(0x49, 0x56, 0x6e), // slate
+            Category::Other => Color32::from_rgb(0x5a, 0x62, 0x73), // gray
+        }
+    }
+
+    /// Short, human label for the status bar.
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Junk => "cache / junk",
+            Category::Media => "media",
+            Category::Archive => "archive",
+            Category::App => "application",
+            Category::Code => "code",
+            Category::Document => "document",
+            Category::Folder => "folder",
+            Category::Other => "other",
         }
     }
 }
 
+fn is_junk_dir(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    JUNK_DIRS.contains(&lower.as_str())
+}
+
 /// Pick black or white text for legibility against a filled cell.
 pub fn contrast_text(bg: Color32) -> Color32 {
-    // Rec. 601 luma.
     let luma = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
     if luma > 140.0 {
         Color32::from_rgb(0x14, 0x16, 0x1b)

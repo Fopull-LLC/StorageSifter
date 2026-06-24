@@ -1,15 +1,18 @@
 //! Treemap rendering and interaction.
 //!
 //! Lays out a node's children with the `treemap` crate and paints them with the
-//! egui `Painter`: flat category-colored cells, hard 1px borders, labels where
-//! they fit, and one level of nested preview inside directories.
+//! egui `Painter`: flat category-colored cells, hard 1px borders, ellipsized
+//! labels, and one level of nested preview inside directories.
 //!
-//! Two interaction results are reported each frame: the *innermost* cell under
-//! the pointer (for the status bar) and, on a click, the *top-level* child that
-//! was clicked (the drill-down target — one level per click). During a zoom
-//! animation the cells are drawn through an affine [`Xform`] so the new view
-//! grows out of the cell that was clicked; interaction is suspended until the
-//! animation settles.
+//! The zoom animation is a *camera*: during a transition the whole current view
+//! is rendered through an affine [`Xform`] that maps a shrinking/growing
+//! `source` rect onto the full area, so drilling in zooms *into* a cell (its
+//! neighbours slide off the edges) rather than blanking the screen. Interaction
+//! is suspended until the camera settles.
+//!
+//! Two interaction results are reported: the *innermost* cell under the pointer
+//! (for the status bar) and, on a click, the *top-level* child clicked (the
+//! drill-down target — one level per click).
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, StrokeKind, Vec2};
 use scanner::{NodeId, NodeKind, Tree};
@@ -31,12 +34,11 @@ pub struct Hit {
     pub rect: ERect,
 }
 
-/// One frame of an in-progress zoom: the cell the new view grows out of, and
-/// the eased progress in `0.0..=1.0`.
+/// One frame of an in-progress zoom: the (already-eased) `source` rect that the
+/// camera maps onto the full area.
 #[derive(Clone, Copy)]
 pub struct Anim {
-    pub focal: ERect,
-    pub t: f32,
+    pub source: ERect,
 }
 
 /// What the treemap reported this frame.
@@ -58,10 +60,7 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
 
     let interactive = anim.is_none();
     let xform = match anim {
-        Some(a) => Xform {
-            full: area,
-            target: lerp_rect(a.focal, area, ease_out_cubic(a.t)),
-        },
+        Some(a) => Xform { source: a.source, area },
         None => Xform::identity(area),
     };
 
@@ -81,23 +80,25 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
         };
     }
 
-    let weights: Vec<u64> = children.iter().map(|&id| tree.node(id).size).collect();
-    let rects = squarify(&weights, to_layout(area));
-
-    let hover_pos = if interactive { response.hover_pos() } else { None };
-    let mut hovered = None;
+    // Monospace metrics, measured once and reused for every label.
+    let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), theme::TEXT);
     let ctx = Paint {
         painter: &painter,
         tree,
         xform,
-        hover_pos,
+        hover_pos: if interactive { response.hover_pos() } else { None },
+        char_w: probe.size().x,
+        line_h: probe.size().y,
     };
+
+    let weights: Vec<u64> = children.iter().map(|&id| tree.node(id).size).collect();
+    let rects = squarify(&weights, to_layout(area));
+
+    let mut hovered = None;
     for (&id, rect) in children.iter().zip(&rects) {
         draw_cell(&ctx, id, *rect, NEST_PREVIEW, &mut hovered);
     }
 
-    // A click targets the top-level child it landed in: one level per click,
-    // regardless of how deep the nested preview goes.
     let clicked = if interactive && response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             children
@@ -134,6 +135,8 @@ struct Paint<'a> {
     tree: &'a Tree,
     xform: Xform,
     hover_pos: Option<Pos2>,
+    char_w: f32,
+    line_h: f32,
 }
 
 fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Option<Hit>) {
@@ -141,7 +144,7 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     if rect.width() < MIN_CELL || rect.height() < MIN_CELL {
         return;
     }
-    let drawn = ctx.xform.apply(rect); // transformed for the zoom animation
+    let drawn = ctx.xform.apply(rect); // camera-transformed for the zoom
     if drawn.width() < 0.5 || drawn.height() < 0.5 {
         return;
     }
@@ -160,6 +163,7 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
         }
     }
 
+    let label_color = theme::contrast_text(color);
     let can_nest = node.kind == NodeKind::Dir
         && nest > 0
         && !node.children.is_empty()
@@ -168,7 +172,7 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
 
     if can_nest {
         let header = ERect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + HEADER_H));
-        draw_label(ctx.painter, ctx.xform.apply(header), ctx.tree.name(id), node.size, theme::TEXT);
+        draw_label(ctx, ctx.xform.apply(header), ctx.tree.name(id), node.size, label_color);
 
         let inner = ERect::from_min_max(
             Pos2::new(rect.min.x + PAD, rect.min.y + HEADER_H),
@@ -180,26 +184,37 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
             draw_cell(ctx, cid, *crect, nest - 1, hovered);
         }
     } else {
-        draw_label(
-            ctx.painter,
-            ctx.xform.apply(rect),
-            ctx.tree.name(id),
-            node.size,
-            theme::contrast_text(color),
-        );
+        draw_label(ctx, drawn, ctx.tree.name(id), node.size, label_color);
     }
 }
 
-/// Draw `name + size` clipped to `area`, but only if it fits.
-fn draw_label(painter: &egui::Painter, area: ERect, name: &str, size: u64, color: Color32) {
+/// Draw `name` (plus size if there is room), ellipsized to fit `area`. Always
+/// shows *something* if even two characters fit — never a blank box.
+fn draw_label(ctx: &Paint, area: ERect, name: &str, size: u64, color: Color32) {
     let inner = area.shrink(4.0);
-    if inner.width() < 12.0 || inner.height() < 8.0 {
+    if ctx.char_w <= 0.0 || inner.width() < ctx.char_w * 2.0 || inner.height() < ctx.line_h {
         return;
     }
-    let text = format!("{}   {}", name, theme::format_size(size));
-    let galley = painter.layout_no_wrap(text, FontId::monospace(LABEL_FONT), color);
-    if galley.size().x <= inner.width() && galley.size().y <= inner.height() {
-        painter.galley(inner.min, galley, color);
+    let max_chars = (inner.width() / ctx.char_w).floor() as usize;
+    let text = fit_text(name, &theme::format_size(size), max_chars);
+    let galley = ctx
+        .painter
+        .layout_no_wrap(text, FontId::monospace(LABEL_FONT), color);
+    ctx.painter.galley(inner.min, galley, color);
+}
+
+/// Fit `name` (and, space permitting, its size) into `max_chars`, ellipsizing
+/// the name with `…` when it must be cut.
+fn fit_text(name: &str, size_str: &str, max_chars: usize) -> String {
+    let name_chars = name.chars().count();
+    if name_chars + 3 + size_str.chars().count() <= max_chars {
+        format!("{name}   {size_str}")
+    } else if name_chars <= max_chars {
+        name.to_owned()
+    } else {
+        let take = max_chars.saturating_sub(1).max(1);
+        let truncated: String = name.chars().take(take).collect();
+        format!("{truncated}…")
     }
 }
 
@@ -220,44 +235,31 @@ fn to_screen(r: Rect) -> ERect {
     )
 }
 
-/// Affine map from the full treemap rect onto a (possibly shrunken) target rect.
-/// Identity when `target == full`. Used to grow the new view out of a focal cell.
+/// Camera transform: maps the `source` rect onto the full `area`, so a shrinking
+/// `source` zooms the view in. Identity when `source == area`.
 #[derive(Clone, Copy)]
 struct Xform {
-    full: ERect,
-    target: ERect,
+    source: ERect,
+    area: ERect,
 }
 
 impl Xform {
-    fn identity(full: ERect) -> Self {
-        Xform { full, target: full }
+    fn identity(area: ERect) -> Self {
+        Xform { source: area, area }
     }
 
     fn apply(&self, r: ERect) -> ERect {
-        if self.full.width() <= 0.0 || self.full.height() <= 0.0 {
+        if self.source.width() <= 0.0 || self.source.height() <= 0.0 {
             return r;
         }
-        let sx = self.target.width() / self.full.width();
-        let sy = self.target.height() / self.full.height();
+        let sx = self.area.width() / self.source.width();
+        let sy = self.area.height() / self.source.height();
         ERect::from_min_size(
             Pos2::new(
-                self.target.min.x + (r.min.x - self.full.min.x) * sx,
-                self.target.min.y + (r.min.y - self.full.min.y) * sy,
+                self.area.min.x + (r.min.x - self.source.min.x) * sx,
+                self.area.min.y + (r.min.y - self.source.min.y) * sy,
             ),
             Vec2::new(r.width() * sx, r.height() * sy),
         )
     }
-}
-
-fn ease_out_cubic(t: f32) -> f32 {
-    let u = 1.0 - t.clamp(0.0, 1.0);
-    1.0 - u * u * u
-}
-
-fn lerp_rect(a: ERect, b: ERect, t: f32) -> ERect {
-    let lerp = |x: f32, y: f32| x + (y - x) * t;
-    ERect::from_min_max(
-        Pos2::new(lerp(a.min.x, b.min.x), lerp(a.min.y, b.min.y)),
-        Pos2::new(lerp(a.max.x, b.max.x), lerp(a.max.y, b.max.y)),
-    )
 }
