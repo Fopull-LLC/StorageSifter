@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["crates/scanner", "crates/treemap", "crates/app"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/fopull/StorageSifter"
+
+# Release profile tuned for fast scans and smooth rendering.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

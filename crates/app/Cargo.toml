@@ -1,0 +1,17 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "StorageSifter desktop UI (eframe/egui on the wgpu backend)."
+default-run = "storagesifter"
+
+[[bin]]
+name = "storagesifter"
+path = "src/main.rs"
+
+[dependencies]
+# egui + the wgpu (Vulkan) backend. glow is disabled; wayland + x11 cover the
+# Linux session types. egui itself is re-exported as `eframe::egui`.
+eframe = { version = "=0.34.3", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }

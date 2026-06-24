@@ -1,0 +1,5 @@
+/target
+**/*.rs.bk
+
+# Cargo.lock is intentionally committed: StorageSifter ships binaries and we
+# pin exact dependency versions for reproducible builds.
