@@ -25,7 +25,6 @@ use crate::theme::{self, Category};
 const MIN_CELL: f32 = 3.0; // don't draw cells smaller than this (short side, px)
 const HEADER_H: f32 = 20.0; // directory title strip (tall enough for the label)
 const PAD: f32 = 2.0; // gap between a directory header and its nested children
-const NEST_PREVIEW: u32 = 1; // levels of nested preview drawn under each cell
 const LABEL_FONT: f32 = 11.0;
 
 /// A cell hit by the pointer: the node and the (untransformed) screen rect it
@@ -71,6 +70,7 @@ pub fn show(
     current: NodeId,
     anim: Option<Anim>,
     selection: &HashSet<NodeId>,
+    nesting: u32,
 ) -> Interaction {
     let size = ui.available_size();
     let (area, response) = ui.allocate_exact_size(size, Sense::click());
@@ -99,13 +99,13 @@ pub fn show(
             line_h,
             selection,
         };
-        draw_node_children(&parent, a.parent, &mut sink);
+        draw_node_children(&parent, a.parent, nesting, &mut sink);
         let child = Paint {
             xform: Xform { src: area, dst: c_dst },
             alpha: c_alpha,
             ..parent
         };
-        draw_node_children(&child, a.child, &mut sink);
+        draw_node_children(&child, a.child, nesting, &mut sink);
         return Interaction {
             hovered: None,
             clicked: None,
@@ -151,7 +151,7 @@ pub fn show(
     let rects = squarify(&weights, to_layout(area));
     let mut hovered = None;
     for (&id, rect) in children.iter().zip(&rects) {
-        draw_cell(&ctx, id, *rect, NEST_PREVIEW, &mut hovered);
+        draw_cell(&ctx, id, *rect, nesting, &mut hovered);
     }
 
     let modifiers = ui.input(|i| i.modifiers);
@@ -205,7 +205,7 @@ struct Paint<'a> {
     selection: &'a HashSet<NodeId>,
 }
 
-fn draw_node_children(ctx: &Paint, node: NodeId, hovered: &mut Option<Hit>) {
+fn draw_node_children(ctx: &Paint, node: NodeId, nesting: u32, hovered: &mut Option<Hit>) {
     let children = sorted_children(ctx.tree, node);
     if children.is_empty() {
         return;
@@ -213,7 +213,7 @@ fn draw_node_children(ctx: &Paint, node: NodeId, hovered: &mut Option<Hit>) {
     let weights: Vec<u64> = children.iter().map(|&id| ctx.tree.node(id).size).collect();
     let rects = squarify(&weights, to_layout(ctx.area));
     for (&id, rect) in children.iter().zip(&rects) {
-        draw_cell(ctx, id, *rect, NEST_PREVIEW, hovered);
+        draw_cell(ctx, id, *rect, nesting, hovered);
     }
 }
 

@@ -96,7 +96,9 @@ archives pink. One level of nested preview is drawn inside each folder.
   the dialog. Protected system roots are refused outright.
 - **Keyboard**: `Delete` trashes the selection, `Shift+Delete` deletes it
   permanently, `Ctrl+A` selects everything in view, `Esc` clears the selection,
-  `Backspace` goes up, `F5` rescans. The **? Keys** button lists them all.
+  `Backspace` goes up, `F5` rescans. All bindings are **configurable in ⚙
+  Settings** (which also toggles zoom animations and the folder preview depth);
+  settings persist to `~/.config/storagesifter/settings.json`.
 
 The first build pulls in the GUI stack and takes a few minutes; after that,
 rebuilds of the app are seconds. A `--release` build is available for maximum

@@ -10,6 +10,7 @@
 mod app;
 mod ops;
 mod scan;
+mod settings;
 mod theme;
 mod treemap_view;
 

@@ -10,6 +10,7 @@ use scanner::{NodeId, NodeKind, Tree};
 
 use crate::ops;
 use crate::scan::Scan;
+use crate::settings::{Action, Keybind, Settings};
 use crate::theme::{self, format_size};
 use crate::treemap_view;
 
@@ -34,6 +35,10 @@ pub struct StorageSifterApp {
     home: PathBuf,
     /// Last operation result, shown in the status bar.
     status: Option<String>,
+    /// User settings (keybindings + behavior toggles).
+    settings: Settings,
+    /// Action awaiting a key to rebind it (settings dialog).
+    capturing: Option<Action>,
 }
 
 struct DiskInfo {
@@ -57,7 +62,7 @@ enum Dialog {
     None,
     Properties(NodeId),
     Confirm { ids: Vec<NodeId>, permanent: bool },
-    Shortcuts,
+    Settings,
 }
 
 enum MenuAction {
@@ -100,6 +105,8 @@ impl StorageSifterApp {
             dialog: Dialog::None,
             home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
             status: None,
+            settings: Settings::load(),
+            capturing: None,
         }
     }
 
@@ -132,10 +139,13 @@ impl eframe::App for StorageSifterApp {
             }
         }
 
-        // F5 / Ctrl+R rescans the current path.
+        // Rescan shortcut (configurable).
         if matches!(self.scan, Some(Scan::Done { .. }))
             && ui.ctx().input(|i| {
-                i.key_pressed(egui::Key::F5) || (i.modifiers.ctrl && i.key_pressed(egui::Key::R))
+                i.events.iter().any(|e| {
+                    matches!(e, egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. }
+                        if self.settings.keys.rescan.matches(*key, *modifiers))
+                })
             })
         {
             self.open(self.path.clone());
@@ -205,8 +215,8 @@ impl StorageSifterApp {
                 if ui.button("⟳  Rescan").clicked() {
                     self.open(self.path.clone());
                 }
-                if ui.button("?  Keys").clicked() {
-                    self.dialog = Dialog::Shortcuts;
+                if ui.button("⚙  Settings").clicked() {
+                    self.dialog = Dialog::Settings;
                 }
                 ui.separator();
                 self.breadcrumb(ui);
@@ -263,15 +273,18 @@ impl StorageSifterApp {
         }
 
         if let Some(target) = jump {
-            self.anim = zoom_out_pivot(tree, self.current, target, self.last_area).map(
-                |(child, pivot)| AnimState {
-                    parent: target,
-                    child,
-                    pivot,
-                    drilling_in: false,
-                    start: None,
-                },
-            );
+            let next = if self.settings.animations {
+                zoom_out_pivot(tree, self.current, target, self.last_area)
+            } else {
+                None
+            };
+            self.anim = next.map(|(child, pivot)| AnimState {
+                parent: target,
+                child,
+                pivot,
+                drilling_in: false,
+                start: None,
+            });
             self.current = target;
             self.hovered = None;
         }
@@ -402,30 +415,48 @@ impl StorageSifterApp {
 
             // Keyboard shortcuts (suppressed while a dialog is open).
             if matches!(self.dialog, Dialog::None) {
-                let (backspace, escape, delete, shift, select_all) = ui.ctx().input(|i| {
-                    (
-                        i.key_pressed(egui::Key::Backspace),
-                        i.key_pressed(egui::Key::Escape),
-                        i.key_pressed(egui::Key::Delete),
-                        i.modifiers.shift,
-                        (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::A),
-                    )
+                let pressed: Vec<(egui::Key, egui::Modifiers)> = ui.ctx().input(|i| {
+                    i.events
+                        .iter()
+                        .filter_map(|e| match e {
+                            egui::Event::Key {
+                                key,
+                                pressed: true,
+                                repeat: false,
+                                modifiers,
+                                ..
+                            } => Some((*key, *modifiers)),
+                            _ => None,
+                        })
+                        .collect()
                 });
+                let hit = |bind: &Keybind| pressed.iter().any(|&(k, m)| bind.matches(k, m));
+                let keys = &self.settings.keys;
+                let (clear, go_up, select_all, trash, delete_perm) = (
+                    hit(&keys.clear_selection),
+                    hit(&keys.go_up),
+                    hit(&keys.select_all),
+                    hit(&keys.trash),
+                    hit(&keys.delete_permanent),
+                );
 
-                // Esc clears a selection first; otherwise Esc/Backspace go up.
-                if escape && !self.selection.is_empty() {
+                // The clear binding clears a selection first, else it goes up.
+                if clear && !self.selection.is_empty() {
                     self.selection.clear();
-                } else if (backspace || escape) && self.anim.is_none() {
+                } else if (go_up || clear) && self.anim.is_none() {
                     if let Some(parent) = tree.node(self.current).parent {
-                        self.anim = zoom_out_pivot(tree, self.current, parent, self.last_area).map(
-                            |(child, pivot)| AnimState {
-                                parent,
-                                child,
-                                pivot,
-                                drilling_in: false,
-                                start: None,
-                            },
-                        );
+                        let pivot = if self.settings.animations {
+                            zoom_out_pivot(tree, self.current, parent, self.last_area)
+                        } else {
+                            None
+                        };
+                        self.anim = pivot.map(|(child, pivot)| AnimState {
+                            parent,
+                            child,
+                            pivot,
+                            drilling_in: false,
+                            start: None,
+                        });
                         self.current = parent;
                     }
                 }
@@ -434,9 +465,9 @@ impl StorageSifterApp {
                     self.selection
                         .extend(tree.node(self.current).children.iter().copied());
                 }
-                if delete && !self.selection.is_empty() {
+                if (trash || delete_perm) && !self.selection.is_empty() {
                     let ids: Vec<NodeId> = self.selection.iter().copied().collect();
-                    match prepare_delete(tree, &self.home, ids, shift) {
+                    match prepare_delete(tree, &self.home, ids, delete_perm) {
                         Ok(dialog) => self.dialog = dialog,
                         Err(msg) => self.status = Some(msg),
                     }
@@ -464,7 +495,14 @@ impl StorageSifterApp {
                 self.anim = None;
             }
 
-            let it = treemap_view::show(ui, tree, self.current, anim, &self.selection);
+            let it = treemap_view::show(
+                ui,
+                tree,
+                self.current,
+                anim,
+                &self.selection,
+                self.settings.nesting_depth,
+            );
             self.last_area = it.area;
             self.hovered = it.hovered.map(|h| h.id);
 
@@ -478,13 +516,15 @@ impl StorageSifterApp {
                 } else {
                     let node = tree.node(hit.id);
                     if node.kind == NodeKind::Dir && !node.children.is_empty() {
-                        self.anim = Some(AnimState {
-                            parent: self.current,
-                            child: hit.id,
-                            pivot: hit.rect,
-                            drilling_in: true,
-                            start: None,
-                        });
+                        if self.settings.animations {
+                            self.anim = Some(AnimState {
+                                parent: self.current,
+                                child: hit.id,
+                                pivot: hit.rect,
+                                drilling_in: true,
+                                start: None,
+                            });
+                        }
                         self.current = hit.id;
                     }
                 }
@@ -533,9 +573,12 @@ impl StorageSifterApp {
                 Confirm::Cancel => {}
                 Confirm::Go => self.execute_delete(ids, permanent),
             },
-            Dialog::Shortcuts => {
-                if show_shortcuts(ctx) {
-                    self.dialog = Dialog::Shortcuts;
+            Dialog::Settings => {
+                if self.show_settings(ctx) {
+                    self.dialog = Dialog::Settings;
+                } else {
+                    self.settings.save();
+                    self.capturing = None;
                 }
             }
         }
@@ -705,6 +748,96 @@ impl StorageSifterApp {
         self.status = Some(report.summary());
         self.selection.clear();
     }
+
+    /// The settings modal: rebindable keys plus behavior toggles. Returns
+    /// whether it should stay open.
+    fn show_settings(&mut self, ctx: &egui::Context) -> bool {
+        // If we're listening for a rebind, capture the next key chord.
+        let mut just_captured = false;
+        if let Some(action) = self.capturing {
+            let captured = ctx.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Key {
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } => Some(Keybind::from_event(*key, *modifiers)),
+                    _ => None,
+                })
+            });
+            if let Some(bind) = captured {
+                self.settings.keys.set(action, bind);
+                self.capturing = None;
+                just_captured = true;
+            }
+        }
+
+        let mut keep = true;
+        let response = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
+            ui.set_width(470.0);
+            ui.heading("Settings");
+            ui.add_space(8.0);
+
+            ui.label(egui::RichText::new("Keybindings").color(theme::ACCENT).strong());
+            ui.label(
+                egui::RichText::new("Click a binding, then press the keys.")
+                    .small()
+                    .color(theme::TEXT_DIM),
+            );
+            ui.add_space(4.0);
+            egui::Grid::new("binds")
+                .num_columns(2)
+                .spacing([18.0, 6.0])
+                .show(ui, |ui| {
+                    for action in Action::ALL {
+                        ui.label(action.label());
+                        let listening = self.capturing == Some(action);
+                        let text = if listening {
+                            "press keys…".to_owned()
+                        } else {
+                            self.settings.keys.get(action).label()
+                        };
+                        let mut button = egui::Button::new(egui::RichText::new(text).monospace())
+                            .min_size(egui::vec2(160.0, 0.0));
+                        if listening {
+                            button = button.fill(theme::ACCENT.gamma_multiply(0.4));
+                        }
+                        if ui.add(button).clicked() {
+                            self.capturing = if listening { None } else { Some(action) };
+                        }
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(12.0);
+
+            ui.label(egui::RichText::new("Behavior").color(theme::ACCENT).strong());
+            ui.add_space(4.0);
+            ui.checkbox(&mut self.settings.animations, "Animate zoom transitions");
+            ui.horizontal(|ui| {
+                ui.label("Folder preview depth");
+                ui.add(egui::Slider::new(&mut self.settings.nesting_depth, 0..=2));
+            });
+            ui.add_space(14.0);
+
+            ui.horizontal(|ui| {
+                if ui.button("Reset to defaults").clicked() {
+                    self.settings = Settings::default();
+                    self.capturing = None;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Close").clicked() {
+                        keep = false;
+                    }
+                });
+            });
+        });
+        // A captured Esc is a rebind, not a request to close the dialog.
+        if response.should_close() && !just_captured {
+            keep = false;
+        }
+        keep
+    }
 }
 
 /// One clickable filesystem row in the device picker.
@@ -841,43 +974,6 @@ fn prop_row(ui: &mut egui::Ui, key: &str, value: String) {
     ui.end_row();
 }
 
-/// The keyboard / mouse reference modal. Returns whether it should stay open.
-fn show_shortcuts(ctx: &egui::Context) -> bool {
-    let mut keep = true;
-    let response = egui::Modal::new(egui::Id::new("shortcuts")).show(ctx, |ui| {
-        ui.set_width(450.0);
-        ui.heading("Keyboard & mouse");
-        ui.add_space(6.0);
-        egui::Grid::new("keys")
-            .num_columns(2)
-            .spacing([18.0, 6.0])
-            .show(ui, |ui| {
-                key_row(ui, "Click", "Open a folder (drill in)");
-                key_row(ui, "Ctrl / Shift-click", "Add a cell to the selection");
-                key_row(ui, "Right-click", "Context menu (properties, delete, …)");
-                key_row(ui, "Backspace", "Go up a level");
-                key_row(ui, "Esc", "Clear the selection, or go up");
-                key_row(ui, "Ctrl+A", "Select everything in view");
-                key_row(ui, "Delete", "Move the selection to Trash");
-                key_row(ui, "Shift+Delete", "Delete the selection permanently");
-                key_row(ui, "F5", "Rescan");
-            });
-        ui.add_space(10.0);
-        if ui.button("Close").clicked() {
-            keep = false;
-        }
-    });
-    if response.should_close() {
-        keep = false;
-    }
-    keep
-}
-
-fn key_row(ui: &mut egui::Ui, key: &str, desc: &str) {
-    ui.label(egui::RichText::new(key).monospace().strong().color(theme::ACCENT));
-    ui.label(egui::RichText::new(desc).color(theme::TEXT));
-    ui.end_row();
-}
 
 fn kind_label(kind: NodeKind) -> &'static str {
     match kind {
