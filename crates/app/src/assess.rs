@@ -72,7 +72,451 @@ pub struct Assessment {
     pub verdict: Verdict,
     pub headline: String,
     pub detail: String,
+    /// The recommended way to clear this, when a tool offers a better command
+    /// than a plain delete (e.g. `npm cache clean --force`). Shown verbatim.
+    pub command: Option<String>,
     pub points: Vec<Point>,
+}
+
+/// One entry in the knowledge catalog: a recognizable kind of file/dir and how
+/// best to clean it up. Matched by path substring (and/or a marker child file),
+/// so adding coverage is just adding a row.
+struct Tool {
+    /// Lowercased path fragments; a match on any one identifies this tool.
+    needles: &'static [&'static str],
+    /// …or recognize it by an immediate child file (e.g. `pyvenv.cfg`).
+    marker: Option<&'static str>,
+    kind: &'static str,
+    verdict: Verdict,
+    detail: &'static str,
+    /// The recommended cleanup command, if one is better than deleting by hand.
+    command: Option<&'static str>,
+    /// Lives in a system location and typically needs root to clear.
+    root: bool,
+}
+
+/// The catalog, ordered most-specific path first so generic entries (e.g. a bare
+/// `~/.cache`) only match when nothing more precise does.
+static CATALOG: &[Tool] = &[
+    // ---- Containers & VMs: deleting the files by hand can corrupt state. ----
+    Tool {
+        needles: &["/var/lib/docker", "/.local/share/docker"],
+        marker: None,
+        kind: "Docker data (images, containers, volumes)",
+        verdict: Verdict::Caution,
+        detail: "Docker's images, containers, and volumes. Deleting these by hand can corrupt Docker and wipe volumes you still need — use Docker's own pruning, which reclaims space safely.",
+        command: Some("docker system prune -a --volumes"),
+        root: true,
+    },
+    Tool {
+        needles: &["/.local/share/containers", "/var/lib/containers"],
+        marker: None,
+        kind: "Container storage (Podman)",
+        verdict: Verdict::Caution,
+        detail: "Podman's image and container storage. Prune it with Podman rather than deleting files directly.",
+        command: Some("podman system prune -a --volumes"),
+        root: false,
+    },
+    Tool {
+        needles: &["/var/lib/libvirt/images"],
+        marker: None,
+        kind: "Virtual machine disk images",
+        verdict: Verdict::Keep,
+        detail: "These are your VMs' virtual disks — deleting one erases that machine's entire disk. Remove VMs through virt-manager / virsh instead.",
+        command: Some("virsh vol-list --pool default"),
+        root: true,
+    },
+    // ---- System caches & logs: reclaimable, but root + a proper tool. ----
+    Tool {
+        needles: &["/var/cache/pacman/pkg"],
+        marker: None,
+        kind: "Pacman package cache",
+        verdict: Verdict::Likely,
+        detail: "Downloaded packages kept so you can reinstall or roll back. The space is reclaimable — trim it safely with paccache (which keeps the most recent versions) instead of deleting everything.",
+        command: Some("sudo paccache -r        # or: sudo pacman -Sc"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/log/journal"],
+        marker: None,
+        kind: "systemd journal logs",
+        verdict: Verdict::Likely,
+        detail: "System logs. Useful for debugging, but you can cap them by age or size rather than deleting them outright.",
+        command: Some("sudo journalctl --vacuum-time=2weeks    # or --vacuum-size=200M"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/lib/systemd/coredump"],
+        marker: None,
+        kind: "Crash core dumps",
+        verdict: Verdict::Safe,
+        detail: "Memory dumps saved when programs crashed — only useful for post-mortem debugging. Safe to clear.",
+        command: None,
+        root: true,
+    },
+    Tool {
+        needles: &["/var/lib/flatpak"],
+        marker: None,
+        kind: "Flatpak apps & runtimes (system)",
+        verdict: Verdict::Caution,
+        detail: "System-wide Flatpak apps and shared runtimes. Remove apps you don't use, then clear orphaned runtimes — don't delete the files by hand.",
+        command: Some("flatpak uninstall --unused        # then: flatpak uninstall <app-id>"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/lib/snapd", "/var/cache/snapd"],
+        marker: None,
+        kind: "Snap data",
+        verdict: Verdict::Caution,
+        detail: "Snap packages and their retained old revisions. Remove snaps you don't use and reduce how many old revisions are kept.",
+        command: Some("sudo snap set system refresh.retain=2"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/cache"],
+        marker: None,
+        kind: "System cache",
+        verdict: Verdict::Likely,
+        detail: "Cache the system rebuilds on demand, so the space is reclaimable — but it lives in a system location and is best cleared through the owning tool (e.g. your package manager) rather than by hand.",
+        command: None,
+        root: true,
+    },
+    Tool {
+        needles: &["/var/tmp/"],
+        marker: None,
+        kind: "Temporary files",
+        verdict: Verdict::Likely,
+        detail: "Scratch space programs leave under /var/tmp. Usually safe to remove — though a running program could be using some of it right now.",
+        command: None,
+        root: false,
+    },
+    // ---- JavaScript / web toolchains ----
+    Tool {
+        needles: &["/.npm/_cacache", "/.npm"],
+        marker: None,
+        kind: "npm cache",
+        verdict: Verdict::Safe,
+        detail: "npm's package download cache. Safe to remove — npm refills it on the next install — but its own command verifies and clears it cleanly.",
+        command: Some("npm cache clean --force"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/yarn", "/.yarn/cache", "/.yarn-cache"],
+        marker: None,
+        kind: "Yarn cache",
+        verdict: Verdict::Safe,
+        detail: "Yarn's package cache. Re-populated on the next install.",
+        command: Some("yarn cache clean"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.local/share/pnpm/store", "/.pnpm-store"],
+        marker: None,
+        kind: "pnpm store",
+        verdict: Verdict::Safe,
+        detail: "pnpm's global content-addressable package store. Prune unreferenced packages rather than wiping it, so your other projects keep their links.",
+        command: Some("pnpm store prune"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.bun/install/cache"],
+        marker: None,
+        kind: "Bun cache",
+        verdict: Verdict::Safe,
+        detail: "Bun's package cache. Re-downloaded as needed.",
+        command: Some("bun pm cache rm"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/ms-playwright"],
+        marker: None,
+        kind: "Playwright browsers",
+        verdict: Verdict::Safe,
+        detail: "Browser binaries Playwright downloaded for testing. Re-installable with `npx playwright install`.",
+        command: Some("npx playwright uninstall --all"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/cypress"],
+        marker: None,
+        kind: "Cypress cache",
+        verdict: Verdict::Safe,
+        detail: "Cypress's downloaded test-runner binaries. Re-downloaded on the next run.",
+        command: Some("cypress cache clear"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/electron", "/.electron"],
+        marker: None,
+        kind: "Electron download cache",
+        verdict: Verdict::Safe,
+        detail: "Cached Electron binaries downloaded by builds. Re-fetched when needed.",
+        command: None,
+        root: false,
+    },
+    // ---- Python ----
+    Tool {
+        needles: &["/.cache/pip"],
+        marker: None,
+        kind: "pip cache",
+        verdict: Verdict::Safe,
+        detail: "pip's wheel and download cache. Re-downloaded on the next install.",
+        command: Some("pip cache purge"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/huggingface", "/.cache/torch"],
+        marker: None,
+        kind: "ML model cache",
+        verdict: Verdict::Likely,
+        detail: "Downloaded machine-learning models and datasets. Reclaimable, but can be many gigabytes and slow (or gated) to re-download — make sure you won't need them soon.",
+        command: None,
+        root: false,
+    },
+    Tool {
+        needles: &["/conda/pkgs", "/.conda/pkgs", "/miniconda3/pkgs", "/anaconda3/pkgs"],
+        marker: None,
+        kind: "Conda package cache",
+        verdict: Verdict::Safe,
+        detail: "Conda's package and tarball cache. Clear it (and other caches) with conda's own command.",
+        command: Some("conda clean --all"),
+        root: false,
+    },
+    Tool {
+        needles: &[],
+        marker: Some("pyvenv.cfg"),
+        kind: "Python virtual environment",
+        verdict: Verdict::Likely,
+        detail: "A self-contained Python environment. Safe to delete and recreate from your requirements — but it is not a cache, so you'll need to rebuild it before running the project again.",
+        command: Some("python -m venv .venv && pip install -r requirements.txt"),
+        root: false,
+    },
+    // ---- Rust / Go / C / JVM / .NET / Ruby / PHP ----
+    Tool {
+        needles: &["/.cargo/registry", "/.cargo/git"],
+        marker: None,
+        kind: "Cargo download cache",
+        verdict: Verdict::Safe,
+        detail: "Downloaded crate sources and the registry index. Re-fetched on the next build. (The cargo-cache tool can trim it while keeping what's in use.)",
+        command: Some("cargo cache --autoclean    # needs: cargo install cargo-cache"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/go-build"],
+        marker: None,
+        kind: "Go build cache",
+        verdict: Verdict::Safe,
+        detail: "Go's compiled build cache. Rebuilt automatically on the next `go build`.",
+        command: Some("go clean -cache"),
+        root: false,
+    },
+    Tool {
+        needles: &["/go/pkg/mod", "/.cache/go/pkg/mod"],
+        marker: None,
+        kind: "Go module cache",
+        verdict: Verdict::Safe,
+        detail: "Downloaded Go modules. Re-fetched on the next build. The cache is read-only, so use Go's own command to remove it.",
+        command: Some("go clean -modcache"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.gradle/caches", "/.gradle"],
+        marker: None,
+        kind: "Gradle cache",
+        verdict: Verdict::Safe,
+        detail: "Gradle's downloaded dependencies and build cache. Re-downloaded when needed — stop the Gradle daemon first if one is running.",
+        command: Some("gradle --stop"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.m2/repository"],
+        marker: None,
+        kind: "Maven repository cache",
+        verdict: Verdict::Safe,
+        detail: "Maven's downloaded dependencies. Re-downloaded on the next build.",
+        command: None,
+        root: false,
+    },
+    Tool {
+        needles: &["/.nuget/packages", "/.cache/nuget"],
+        marker: None,
+        kind: ".NET NuGet cache",
+        verdict: Verdict::Safe,
+        detail: "NuGet's global package cache. Cleared with the dotnet CLI.",
+        command: Some("dotnet nuget locals all --clear"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.ccache", "/.cache/ccache"],
+        marker: None,
+        kind: "Compiler cache (ccache)",
+        verdict: Verdict::Safe,
+        detail: "Cached C/C++ compiler output. Rebuilt as you compile; clear it with ccache itself.",
+        command: Some("ccache -C"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/sccache"],
+        marker: None,
+        kind: "Compiler cache (sccache)",
+        verdict: Verdict::Safe,
+        detail: "Cached compiler output (sccache). Rebuilt as you compile.",
+        command: None,
+        root: false,
+    },
+    Tool {
+        needles: &["/.gem", "/.cache/gem"],
+        marker: None,
+        kind: "RubyGems cache",
+        verdict: Verdict::Safe,
+        detail: "Cached Ruby gems. Re-downloaded as needed; gem's own cleanup removes old versions.",
+        command: Some("gem cleanup"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/composer", "/.composer/cache"],
+        marker: None,
+        kind: "Composer cache",
+        verdict: Verdict::Safe,
+        detail: "PHP Composer's download cache. Re-downloaded on the next install.",
+        command: Some("composer clear-cache"),
+        root: false,
+    },
+    // ---- Language version managers: installed toolchains, not caches. ----
+    Tool {
+        needles: &["/.rustup/toolchains", "/.rustup"],
+        marker: None,
+        kind: "Rust toolchains (rustup)",
+        verdict: Verdict::Caution,
+        detail: "Installed Rust toolchains and components — not a cache. Remove specific ones with rustup so it stays consistent.",
+        command: Some("rustup toolchain list    # then: rustup toolchain uninstall <name>"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.nvm/versions", "/.nvm"],
+        marker: None,
+        kind: "Node versions (nvm)",
+        verdict: Verdict::Caution,
+        detail: "Node.js versions installed by nvm. Remove versions you no longer use via nvm.",
+        command: Some("nvm uninstall <version>"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.pyenv/versions", "/.pyenv"],
+        marker: None,
+        kind: "Python versions (pyenv)",
+        verdict: Verdict::Caution,
+        detail: "Python versions installed by pyenv. Remove ones you don't use via pyenv.",
+        command: Some("pyenv uninstall <version>"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.asdf/installs", "/.asdf"],
+        marker: None,
+        kind: "asdf toolchains",
+        verdict: Verdict::Caution,
+        detail: "Tool versions installed by asdf. Remove ones you don't use via asdf.",
+        command: Some("asdf uninstall <tool> <version>"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.sdkman"],
+        marker: None,
+        kind: "SDKMAN toolchains",
+        verdict: Verdict::Caution,
+        detail: "JVM SDKs installed by SDKMAN. Remove ones you don't use via sdk.",
+        command: Some("sdk uninstall <candidate> <version>"),
+        root: false,
+    },
+    // ---- Browsers ----
+    Tool {
+        needles: &[
+            "/.cache/mozilla",
+            "/.cache/google-chrome",
+            "/.cache/chromium",
+            "/.cache/bravesoftware",
+            "/.cache/vivaldi",
+            "/.cache/microsoft-edge",
+            "/.cache/opera",
+        ],
+        marker: None,
+        kind: "Browser cache",
+        verdict: Verdict::Safe,
+        detail: "Cached web pages and assets. Rebuilt as you browse — clearing this won't log you out or remove bookmarks.",
+        command: None,
+        root: false,
+    },
+    Tool {
+        needles: &[
+            "/.mozilla/firefox",
+            "/.config/google-chrome",
+            "/.config/chromium",
+            "/.config/bravesoftware",
+            "/.config/microsoft-edge",
+            "/.config/vivaldi",
+        ],
+        marker: None,
+        kind: "Browser profile & data",
+        verdict: Verdict::Keep,
+        detail: "Your browser profile: history, bookmarks, saved passwords, cookies, and extensions. Deleting it wipes all of that — clear browsing data from inside the browser instead.",
+        command: None,
+        root: false,
+    },
+    // ---- Flatpak / per-user app data ----
+    Tool {
+        needles: &["/.var/app/"],
+        marker: None,
+        kind: "Flatpak app data",
+        verdict: Verdict::Caution,
+        detail: "A Flatpak app's per-user data (settings, saves, and its own caches). Deleting loses that app's state — uninstalling the app is the clean way to remove it.",
+        command: Some("flatpak uninstall <app-id>"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.local/share/flatpak"],
+        marker: None,
+        kind: "Flatpak apps & runtimes (user)",
+        verdict: Verdict::Caution,
+        detail: "Per-user Flatpak apps and runtimes. Remove unused runtimes and apps via flatpak.",
+        command: Some("flatpak uninstall --unused"),
+        root: false,
+    },
+    // ---- Trash / thumbnails / generic cache (most generic last) ----
+    Tool {
+        needles: &["/.local/share/trash", "/.trash"],
+        marker: None,
+        kind: "Trash",
+        verdict: Verdict::Safe,
+        detail: "Files already moved to the trash. Emptying it frees the space for good — these won't be recoverable afterward.",
+        command: Some("gio trash --empty"),
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache/thumbnails", "/.thumbnails"],
+        marker: None,
+        kind: "Thumbnail cache",
+        verdict: Verdict::Safe,
+        detail: "Cached image and video thumbnails. Regenerated automatically as you browse folders.",
+        command: None,
+        root: false,
+    },
+    Tool {
+        needles: &["/.cache"],
+        marker: None,
+        kind: "Application cache",
+        verdict: Verdict::Safe,
+        detail: "Per-user cache shared by many apps. They rebuild whatever they need, so clearing it is safe and frees space.",
+        command: None,
+        root: false,
+    },
+];
+
+/// First catalog entry that recognizes this node, if any.
+fn recognize(tree: &Tree, id: NodeId, path_lower: &str) -> Option<&'static Tool> {
+    CATALOG.iter().find(|t| {
+        t.needles.iter().any(|n| path_lower.contains(n))
+            || t.marker.is_some_and(|m| has_child(tree, id, m))
+    })
 }
 
 const CRED_DIRS: &[&str] = &[
@@ -143,6 +587,23 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path) -> Assessment {
             points,
         );
     }
+
+    // --- Knowledge catalog: a recognized tool/cache/data directory. This is
+    // where most of the "what is this and how should I clear it" intelligence
+    // lives — it can attach a recommended command and the right caveats.
+    let path_lower = path.to_string_lossy().to_ascii_lowercase();
+    if let Some(t) = recognize(tree, id, &path_lower) {
+        if t.root {
+            points.push(Point::bad("System-managed — clearing it usually needs root"));
+        }
+        if t.command.is_some() {
+            points.push(Point::good("Has a dedicated cleanup command (below)"));
+        }
+        let mut report = finish(t.verdict, t.kind, t.detail, points);
+        report.command = t.command.map(str::to_owned);
+        return report;
+    }
+
     // --- Caches / build output / temp: the space is reclaimable. This is
     // checked *before* the bare system-location case below, because a
     // system-managed cache (e.g. /var/cache) is still a cache — but it should
@@ -353,6 +814,7 @@ fn finish(verdict: Verdict, headline: &str, detail: &str, points: Vec<Point>) ->
         verdict,
         headline: headline.to_owned(),
         detail: detail.to_owned(),
+        command: None,
         points,
     }
 }
@@ -557,5 +1019,114 @@ mod tests {
             "proj",
         );
         assert_eq!(v, Verdict::Caution);
+    }
+
+    // The first tree node whose path ends with `suffix` (so we can target a
+    // nested directory, not just a direct child of the scan root).
+    fn find(tree: &Tree, suffix: &str) -> NodeId {
+        (0..tree.len() as u32)
+            .find(|&id| tree.path(id).to_string_lossy().ends_with(suffix))
+            .expect("a node with that path suffix should exist")
+    }
+
+    fn report_at(make: impl FnOnce(&std::path::Path), suffix: &str) -> Assessment {
+        let dir = tempdir().unwrap();
+        make(dir.path());
+        let tree = scan(dir.path()).unwrap();
+        let id = find(&tree, suffix);
+        assess(&tree, id, Path::new(NOWHERE))
+    }
+
+    #[test]
+    fn npm_cache_recommends_command() {
+        let a = report_at(
+            |root| {
+                let c = root.join(".npm").join("_cacache");
+                fs::create_dir_all(&c).unwrap();
+                fs::write(c.join("blob"), b"x").unwrap();
+            },
+            "/.npm",
+        );
+        assert_eq!(a.verdict, Verdict::Safe);
+        assert!(a.command.as_deref().unwrap().contains("npm cache clean"));
+    }
+
+    #[test]
+    fn pip_cache_recommends_command() {
+        let a = report_at(
+            |root| {
+                let c = root.join(".cache").join("pip");
+                fs::create_dir_all(&c).unwrap();
+                fs::write(c.join("wheel"), b"x").unwrap();
+            },
+            "/.cache/pip",
+        );
+        assert_eq!(a.verdict, Verdict::Safe);
+        assert!(a.command.as_deref().unwrap().contains("pip cache purge"));
+    }
+
+    #[test]
+    fn go_build_cache_recommends_command() {
+        let a = report_at(
+            |root| {
+                let c = root.join(".cache").join("go-build");
+                fs::create_dir_all(&c).unwrap();
+                fs::write(c.join("ab"), b"x").unwrap();
+            },
+            "/.cache/go-build",
+        );
+        assert_eq!(a.verdict, Verdict::Safe);
+        assert!(a.command.as_deref().unwrap().contains("go clean -cache"));
+    }
+
+    #[test]
+    fn virtualenv_recognized_by_marker() {
+        let a = report_at(
+            |root| {
+                let v = root.join("myenv");
+                fs::create_dir_all(v.join("bin")).unwrap();
+                fs::write(v.join("pyvenv.cfg"), b"home = /usr").unwrap();
+            },
+            "/myenv",
+        );
+        assert_eq!(a.verdict, Verdict::Likely);
+        assert!(a.command.as_deref().unwrap().contains("venv"));
+    }
+
+    #[test]
+    fn browser_cache_is_safe_but_profile_is_kept() {
+        let cache = report_at(
+            |root| {
+                let c = root.join(".cache").join("mozilla");
+                fs::create_dir_all(&c).unwrap();
+                fs::write(c.join("c"), b"x").unwrap();
+            },
+            "/.cache/mozilla",
+        );
+        assert_eq!(cache.verdict, Verdict::Safe);
+
+        let profile = report_at(
+            |root| {
+                let p = root.join(".mozilla").join("firefox").join("ab.default");
+                fs::create_dir_all(&p).unwrap();
+                fs::write(p.join("places.sqlite"), b"x").unwrap();
+            },
+            "/.mozilla/firefox/ab.default",
+        );
+        assert_eq!(profile.verdict, Verdict::Keep);
+    }
+
+    #[test]
+    fn rustup_toolchains_warn() {
+        let a = report_at(
+            |root| {
+                let c = root.join(".rustup").join("toolchains").join("stable");
+                fs::create_dir_all(&c).unwrap();
+                fs::write(c.join("marker"), b"x").unwrap();
+            },
+            "/.rustup/toolchains/stable",
+        );
+        assert_eq!(a.verdict, Verdict::Caution);
+        assert!(a.command.as_deref().unwrap().contains("rustup toolchain"));
     }
 }

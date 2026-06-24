@@ -698,6 +698,44 @@ impl StorageSifterApp {
             ui.add_space(10.0);
             ui.label(&report.detail);
 
+            // Recommended cleanup command, when a tool offers a better way.
+            if let Some(cmd) = &report.command {
+                ui.add_space(10.0);
+                ui.label(
+                    egui::RichText::new("Recommended way to clear it")
+                        .color(theme::MOUNT)
+                        .strong(),
+                );
+                ui.add_space(2.0);
+                egui::Frame::new()
+                    .fill(theme::BG)
+                    .inner_margin(egui::Margin::symmetric(8, 6))
+                    .corner_radius(4)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(cmd).monospace().color(theme::TEXT),
+                                )
+                                .wrap(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.small_button("Copy").clicked() {
+                                        ui.ctx().copy_text(cmd.clone());
+                                    }
+                                },
+                            );
+                        });
+                    });
+                ui.label(
+                    egui::RichText::new("Run this in a terminal — StorageSifter won't run it for you.")
+                        .color(theme::TEXT_DIM)
+                        .small(),
+                );
+            }
+
             if !report.points.is_empty() {
                 ui.add_space(10.0);
                 for p in &report.points {
