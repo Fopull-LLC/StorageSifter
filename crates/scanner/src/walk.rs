@@ -20,6 +20,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
@@ -49,23 +50,34 @@ pub fn scan(root: &Path) -> io::Result<Tree> {
     let meta = fs::symlink_metadata(root)?;
     let mut allowed = FxHashSet::default();
     allowed.insert(meta.dev());
-    scan_with_allowed(root, allowed)
+    scan_with_allowed(root, allowed, &AtomicBool::new(false))
 }
 
 /// Like [`scan`], but follows the whole physical filesystem `root` lives on,
 /// crossing into sibling subvolumes / bind mounts on the same source device
 /// (e.g. btrfs `/home`, `/var`). Genuinely different drives are still pruned.
 pub fn scan_filesystem(root: &Path) -> io::Result<Tree> {
+    scan_filesystem_cancellable(root, &AtomicBool::new(false))
+}
+
+/// Like [`scan_filesystem`], but abandons the walk promptly once `cancel`
+/// becomes `true`, returning whatever partial tree it had reached (the caller is
+/// expected to discard it). Lets the UI cancel a long scan or a superseded one.
+pub fn scan_filesystem_cancellable(root: &Path, cancel: &AtomicBool) -> io::Result<Tree> {
     fs::symlink_metadata(root)?; // surface a clear error if `root` is unreadable
     let allowed = crate::mounts::same_filesystem_devices(root);
-    scan_with_allowed(root, allowed)
+    scan_with_allowed(root, allowed, cancel)
 }
 
 /// Scan `root`, descending into any child whose device is in `allowed`. Exposed
 /// within the crate so tests can control exactly which devices are crossed.
-pub(crate) fn scan_with_allowed(root: &Path, allowed: FxHashSet<u64>) -> io::Result<Tree> {
+pub(crate) fn scan_with_allowed(
+    root: &Path,
+    allowed: FxHashSet<u64>,
+    cancel: &AtomicBool,
+) -> io::Result<Tree> {
     let meta = fs::symlink_metadata(root)?;
-    let raw = build(root.to_path_buf(), &meta, &allowed);
+    let raw = build(root.to_path_buf(), &meta, &allowed, cancel);
     Ok(flatten(raw, root, meta.dev()))
 }
 
@@ -87,7 +99,7 @@ fn kind_of(meta: &fs::Metadata) -> NodeKind {
 /// and `lstat`-ed; children on a device not in `allowed` are pruned, and the
 /// survivors are recursed into in parallel. A child whose device differs from
 /// its parent's just crossed a mount/subvolume boundary and is flagged.
-fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>) -> Raw {
+fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>, cancel: &AtomicBool) -> Raw {
     let own_size = meta.blocks() * 512;
     let name = path
         .file_name()
@@ -109,6 +121,10 @@ fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>) -> Raw {
     if !meta.is_dir() {
         // File, symlink, or other special file: a leaf. We never follow links.
         return leaf(false, kind_of(meta), Vec::new());
+    }
+    // Cancellation: stop descending promptly and let the walk wind down.
+    if cancel.load(Ordering::Relaxed) {
+        return leaf(false, NodeKind::Dir, Vec::new());
     }
 
     // Directory: read its entries. A read failure (e.g. EACCES) is recorded but
@@ -149,7 +165,7 @@ fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>) -> Raw {
         .into_par_iter()
         .map(|(p, m)| {
             let is_mount = m.dev() != parent_dev;
-            let mut child = build(p, &m, allowed);
+            let mut child = build(p, &m, allowed, cancel);
             child.is_mount = is_mount;
             child
         })
@@ -254,7 +270,7 @@ mod tests {
         // Correct device allowed: children are present.
         let mut real = FxHashSet::default();
         real.insert(real_dev);
-        let ok = scan_with_allowed(root, real).unwrap();
+        let ok = scan_with_allowed(root, real, &AtomicBool::new(false)).unwrap();
         assert!(ok.len() > 1, "real device should include children");
 
         // Only a foreign device allowed: every child crosses a (simulated)
@@ -262,7 +278,7 @@ mod tests {
         // `du -x` does at a mount point.
         let mut wrong = FxHashSet::default();
         wrong.insert(real_dev.wrapping_add(1));
-        let pruned = scan_with_allowed(root, wrong).unwrap();
+        let pruned = scan_with_allowed(root, wrong, &AtomicBool::new(false)).unwrap();
         assert_eq!(pruned.len(), 1, "all foreign-device children pruned");
         assert_eq!(pruned.root, 0);
     }

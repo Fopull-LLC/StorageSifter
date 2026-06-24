@@ -65,17 +65,29 @@ fn parse_line(line: &str) -> Option<(PathBuf, String)> {
 }
 
 /// Undo the octal escaping `mountinfo` applies to space/tab/newline/backslash.
+///
+/// Works entirely on bytes — slicing the `&str` by byte offset would panic when
+/// a backslash sits next to a multibyte UTF-8 sequence.
 fn unescape(s: &str) -> PathBuf {
     if !s.contains('\\') {
         return PathBuf::from(s);
     }
     let bytes = s.as_bytes();
+    let is_octal = |b: u8| (b'0'..=b'7').contains(&b);
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 3 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 4], 8) {
-                out.push(byte);
+        if bytes[i] == b'\\'
+            && i + 3 < bytes.len()
+            && is_octal(bytes[i + 1])
+            && is_octal(bytes[i + 2])
+            && is_octal(bytes[i + 3])
+        {
+            let value = (bytes[i + 1] - b'0') as u16 * 64
+                + (bytes[i + 2] - b'0') as u16 * 8
+                + (bytes[i + 3] - b'0') as u16;
+            if value <= 255 {
+                out.push(value as u8);
                 i += 4;
                 continue;
             }
@@ -84,4 +96,18 @@ fn unescape(s: &str) -> PathBuf {
         i += 1;
     }
     PathBuf::from(OsString::from_vec(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unescape_octal_and_utf8_safe() {
+        assert_eq!(unescape("/mnt/My\\040Drive"), PathBuf::from("/mnt/My Drive"));
+        assert_eq!(unescape("/plain/path"), PathBuf::from("/plain/path"));
+        // A backslash adjacent to multibyte UTF-8 must not panic.
+        let _ = unescape("/mnt/\\é");
+        let _ = unescape("/a\\");
+    }
 }

@@ -82,14 +82,17 @@ fn remove(path: &Path) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-/// Open the system file manager at `path` (or its parent, for a file).
+/// Open the system file manager at `path` (or its parent, for a file). Does
+/// nothing if the target no longer exists (e.g. the path was just deleted).
 pub fn reveal(path: &Path) {
     let target = if path.is_dir() {
         path
     } else {
         path.parent().unwrap_or(path)
     };
-    let _ = std::process::Command::new("xdg-open").arg(target).spawn();
+    if target.exists() {
+        let _ = std::process::Command::new("xdg-open").arg(target).spawn();
+    }
 }
 
 #[cfg(test)]

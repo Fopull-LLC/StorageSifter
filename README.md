@@ -94,6 +94,9 @@ archives pink. One level of nested preview is drawn inside each folder.
   delete. The trash is the default (reversible); every delete is confirmed, and
   permanent deletes — or anything outside your home directory — are flagged in
   the dialog. Protected system roots are refused outright.
+- **Keyboard**: `Delete` trashes the selection, `Shift+Delete` deletes it
+  permanently, `Ctrl+A` selects everything in view, `Esc` clears the selection,
+  `Backspace` goes up, `F5` rescans. The **? Keys** button lists them all.
 
 The first build pulls in the GUI stack and takes a few minutes; after that,
 rebuilds of the app are seconds. A `--release` build is available for maximum

@@ -34,7 +34,10 @@ pub fn classify(path: &Path, home: &Path) -> Class {
     if CRITICAL.iter().any(|c| path == Path::new(c)) {
         return Class::Critical;
     }
-    if path.starts_with(home) {
+    // An empty `home` (e.g. `$HOME` unset) must NOT match every path — that would
+    // silently mark everything "normal" and disable the guardrails. Fail safe:
+    // treat it as never matching, so paths fall through to System/OutsideHome.
+    if !home.as_os_str().is_empty() && path.starts_with(home) {
         return Class::Normal;
     }
     if SYSTEM.iter().any(|s| path.starts_with(s)) {
@@ -48,9 +51,9 @@ pub fn classify(path: &Path, home: &Path) -> Class {
 
 /// Convenience wrapper that reads `$HOME` from the environment.
 pub fn classify_with_env(path: &Path) -> Class {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"));
+    // An unset `$HOME` yields an empty path, which `classify` treats as matching
+    // nothing — so we never fall back to `/` (which would mark everything Normal).
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     classify(path, &home)
 }
 
@@ -69,5 +72,14 @@ mod tests {
         assert_eq!(classify(Path::new("/boot/grub"), home), Class::Critical);
         assert_eq!(classify(Path::new("/usr/lib"), home), Class::System);
         assert_eq!(classify(Path::new("/mnt/data"), home), Class::OutsideHome);
+    }
+
+    #[test]
+    fn empty_home_is_fail_safe() {
+        // $HOME unset must not classify everything as Normal.
+        let nohome = Path::new("");
+        assert_eq!(classify(Path::new("/home/me/x"), nohome), Class::OutsideHome);
+        assert_eq!(classify(Path::new("/usr/lib"), nohome), Class::System);
+        assert_eq!(classify(Path::new("/"), nohome), Class::Critical);
     }
 }

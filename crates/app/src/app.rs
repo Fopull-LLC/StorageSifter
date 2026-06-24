@@ -57,6 +57,7 @@ enum Dialog {
     None,
     Properties(NodeId),
     Confirm { ids: Vec<NodeId>, permanent: bool },
+    Shortcuts,
 }
 
 enum MenuAction {
@@ -103,6 +104,9 @@ impl StorageSifterApp {
     }
 
     fn open(&mut self, path: PathBuf) {
+        if let Some(old) = &self.scan {
+            old.cancel(); // don't leave a superseded scan churning in the background
+        }
         self.scan = Some(Scan::start(&path));
         self.path = path;
         self.current = 0;
@@ -126,6 +130,15 @@ impl eframe::App for StorageSifterApp {
             if scan.is_running() {
                 ui.ctx().request_repaint();
             }
+        }
+
+        // F5 / Ctrl+R rescans the current path.
+        if matches!(self.scan, Some(Scan::Done { .. }))
+            && ui.ctx().input(|i| {
+                i.key_pressed(egui::Key::F5) || (i.modifiers.ctrl && i.key_pressed(egui::Key::R))
+            })
+        {
+            self.open(self.path.clone());
         }
 
         self.toolbar(ui);
@@ -183,11 +196,17 @@ impl StorageSifterApp {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 if ui.button("≡  Devices").clicked() {
+                    if let Some(scan) = &self.scan {
+                        scan.cancel();
+                    }
                     self.scan = None;
                     self.disks = list_disks();
                 }
                 if ui.button("⟳  Rescan").clicked() {
                     self.open(self.path.clone());
+                }
+                if ui.button("?  Keys").clicked() {
+                    self.dialog = Dialog::Shortcuts;
                 }
                 ui.separator();
                 self.breadcrumb(ui);
@@ -266,7 +285,10 @@ impl StorageSifterApp {
             return;
         };
         let count = self.selection.len();
-        let total: u64 = self.selection.iter().map(|&id| tree.node(id).size).sum();
+        // De-duplicate nested selections so a folder + a child inside it isn't
+        // counted twice in the reclaimable total.
+        let independent = independent_nodes(tree, self.selection.iter().copied().collect());
+        let total: u64 = independent.iter().map(|&id| tree.node(id).size).sum();
 
         let mut action = None;
         egui::Panel::top("selection").show_inside(ui, |ui| {
@@ -348,6 +370,7 @@ impl StorageSifterApp {
     fn treemap(&mut self, ui: &mut egui::Ui) {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
+                let running = matches!(self.scan.as_ref(), Some(Scan::Running { .. }));
                 let msg = match self.scan.as_ref() {
                     Some(Scan::Running { started, .. }) => {
                         format!("Scanning…  {:.1}s", started.elapsed().as_secs_f64())
@@ -355,27 +378,68 @@ impl StorageSifterApp {
                     Some(Scan::Error(e)) => format!("Scan failed:\n{e}"),
                     _ => String::new(),
                 };
-                center_message(ui, &msg);
+                let mut back = false;
+                ui.vertical_centered(|ui| {
+                    ui.add_space(ui.available_height() * 0.4);
+                    let color = if running { theme::TEXT_DIM } else { theme::DANGER };
+                    ui.label(egui::RichText::new(msg).color(color).size(16.0));
+                    ui.add_space(12.0);
+                    let label = if running { "Cancel" } else { "Back to devices" };
+                    if ui.button(label).clicked() {
+                        back = true;
+                    }
+                });
+                if back {
+                    if let Some(scan) = &self.scan {
+                        scan.cancel();
+                    }
+                    self.scan = None;
+                }
                 return;
             };
 
             let now = ui.ctx().input(|i| i.time);
 
-            let go_up = ui
-                .ctx()
-                .input(|i| i.key_pressed(egui::Key::Backspace) || i.key_pressed(egui::Key::Escape));
-            if go_up && self.anim.is_none() {
-                if let Some(parent) = tree.node(self.current).parent {
-                    self.anim = zoom_out_pivot(tree, self.current, parent, self.last_area).map(
-                        |(child, pivot)| AnimState {
-                            parent,
-                            child,
-                            pivot,
-                            drilling_in: false,
-                            start: None,
-                        },
-                    );
-                    self.current = parent;
+            // Keyboard shortcuts (suppressed while a dialog is open).
+            if matches!(self.dialog, Dialog::None) {
+                let (backspace, escape, delete, shift, select_all) = ui.ctx().input(|i| {
+                    (
+                        i.key_pressed(egui::Key::Backspace),
+                        i.key_pressed(egui::Key::Escape),
+                        i.key_pressed(egui::Key::Delete),
+                        i.modifiers.shift,
+                        (i.modifiers.ctrl || i.modifiers.command) && i.key_pressed(egui::Key::A),
+                    )
+                });
+
+                // Esc clears a selection first; otherwise Esc/Backspace go up.
+                if escape && !self.selection.is_empty() {
+                    self.selection.clear();
+                } else if (backspace || escape) && self.anim.is_none() {
+                    if let Some(parent) = tree.node(self.current).parent {
+                        self.anim = zoom_out_pivot(tree, self.current, parent, self.last_area).map(
+                            |(child, pivot)| AnimState {
+                                parent,
+                                child,
+                                pivot,
+                                drilling_in: false,
+                                start: None,
+                            },
+                        );
+                        self.current = parent;
+                    }
+                }
+
+                if select_all {
+                    self.selection
+                        .extend(tree.node(self.current).children.iter().copied());
+                }
+                if delete && !self.selection.is_empty() {
+                    let ids: Vec<NodeId> = self.selection.iter().copied().collect();
+                    match prepare_delete(tree, &self.home, ids, shift) {
+                        Ok(dialog) => self.dialog = dialog,
+                        Err(msg) => self.status = Some(msg),
+                    }
                 }
             }
 
@@ -400,19 +464,7 @@ impl StorageSifterApp {
                 self.anim = None;
             }
 
-            // Flag top-level cells that are system / outside-home locations.
-            let warn: HashSet<NodeId> = if anim.is_none() {
-                tree.node(self.current)
-                    .children
-                    .iter()
-                    .copied()
-                    .filter(|&c| safety_note(classify(&tree.path(c), &self.home)).is_some())
-                    .collect()
-            } else {
-                HashSet::new()
-            };
-
-            let it = treemap_view::show(ui, tree, self.current, anim, &self.selection, &warn);
+            let it = treemap_view::show(ui, tree, self.current, anim, &self.selection);
             self.last_area = it.area;
             self.hovered = it.hovered.map(|h| h.id);
 
@@ -481,6 +533,11 @@ impl StorageSifterApp {
                 Confirm::Cancel => {}
                 Confirm::Go => self.execute_delete(ids, permanent),
             },
+            Dialog::Shortcuts => {
+                if show_shortcuts(ctx) {
+                    self.dialog = Dialog::Shortcuts;
+                }
+            }
         }
     }
 
@@ -617,11 +674,34 @@ impl StorageSifterApp {
             ops::Mode::Trash
         };
         let report = ops::perform(&targets, mode);
+        let mut removed: HashSet<NodeId> = HashSet::new();
         for (&id, (path, _)) in ids.iter().zip(&targets) {
             if report.succeeded.contains(path) {
                 tree.remove_subtree(id);
+                removed.insert(id);
             }
         }
+
+        // If we just deleted the folder being viewed (or an ancestor of it),
+        // retreat to the nearest surviving ancestor — otherwise the treemap would
+        // keep rendering a subtree that no longer exists on disk.
+        let mut node = self.current;
+        let mut landing = None;
+        loop {
+            if removed.contains(&node) {
+                landing = tree.node(node).parent;
+            }
+            match tree.node(node).parent {
+                Some(parent) => node = parent,
+                None => break,
+            }
+        }
+        if let Some(target) = landing {
+            self.current = target;
+            self.anim = None;
+            self.hovered = None;
+        }
+
         self.status = Some(report.summary());
         self.selection.clear();
     }
@@ -761,6 +841,44 @@ fn prop_row(ui: &mut egui::Ui, key: &str, value: String) {
     ui.end_row();
 }
 
+/// The keyboard / mouse reference modal. Returns whether it should stay open.
+fn show_shortcuts(ctx: &egui::Context) -> bool {
+    let mut keep = true;
+    let response = egui::Modal::new(egui::Id::new("shortcuts")).show(ctx, |ui| {
+        ui.set_width(450.0);
+        ui.heading("Keyboard & mouse");
+        ui.add_space(6.0);
+        egui::Grid::new("keys")
+            .num_columns(2)
+            .spacing([18.0, 6.0])
+            .show(ui, |ui| {
+                key_row(ui, "Click", "Open a folder (drill in)");
+                key_row(ui, "Ctrl / Shift-click", "Add a cell to the selection");
+                key_row(ui, "Right-click", "Context menu (properties, delete, …)");
+                key_row(ui, "Backspace", "Go up a level");
+                key_row(ui, "Esc", "Clear the selection, or go up");
+                key_row(ui, "Ctrl+A", "Select everything in view");
+                key_row(ui, "Delete", "Move the selection to Trash");
+                key_row(ui, "Shift+Delete", "Delete the selection permanently");
+                key_row(ui, "F5", "Rescan");
+            });
+        ui.add_space(10.0);
+        if ui.button("Close").clicked() {
+            keep = false;
+        }
+    });
+    if response.should_close() {
+        keep = false;
+    }
+    keep
+}
+
+fn key_row(ui: &mut egui::Ui, key: &str, desc: &str) {
+    ui.label(egui::RichText::new(key).monospace().strong().color(theme::ACCENT));
+    ui.label(egui::RichText::new(desc).color(theme::TEXT));
+    ui.end_row();
+}
+
 fn kind_label(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Dir => "Folder",
@@ -841,10 +959,4 @@ fn segment_label(tree: &Tree, id: NodeId) -> String {
     } else {
         tree.name(id).to_string()
     }
-}
-
-fn center_message(ui: &mut egui::Ui, text: &str) {
-    ui.centered_and_justified(|ui| {
-        ui.label(egui::RichText::new(text).color(theme::TEXT_DIM).size(16.0));
-    });
 }
