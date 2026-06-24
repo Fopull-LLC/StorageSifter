@@ -5,9 +5,9 @@ A fast, lightweight disk-usage visualizer for Linux. It maps a filesystem as a
 consume — so the biggest space hogs are obvious at a glance. Think SpaceSniffer,
 but native, GPU-accelerated, and built for a single Linux machine.
 
-> Status: early development. Phases 0–3 are in place — the scanning engine, the
-> squarified layout, and a static treemap UI that renders a scanned directory.
-> Drill-down, animation, and file operations come next.
+> Status: early development. Phases 0–4 are in place — the scanning engine, the
+> squarified layout, and an interactive treemap UI with click-to-drill, a
+> breadcrumb, and animated zoom. File operations (select / trash / delete) are next.
 
 ## Architecture
 
@@ -64,13 +64,23 @@ cargo test  -p scanner         # run the scanner's correctness tests
 ## Running the visualizer
 
 ```sh
-cargo run --release -p app -- [PATH]    # treemap of PATH (defaults to $HOME)
+cargo run -p app -- [PATH]    # treemap of PATH (defaults to $HOME)
 ```
 
 A dark, GPU-rendered window opens and a background scan fills in a squarified
-treemap of the directory: cells sized by on-disk usage, colored by file
-category, with one level of nested preview inside each folder. Hover a cell to
-see its full path and size in the status bar; use **Rescan** to refresh.
+treemap: cells sized by on-disk usage, colored by file category, with one level
+of nested preview inside each folder.
+
+- **Click** a folder to drill into it — the view zooms in, growing out of the
+  cell you clicked.
+- The **breadcrumb** (top bar) shows where you are; click any segment to jump
+  back up. **Backspace** or **Esc** goes up one level.
+- **Hover** a cell to read its full path and size in the status bar.
+- **Rescan** re-reads the directory.
+
+The first build pulls in the GUI stack and takes a few minutes; after that,
+rebuilds of the app are seconds. A `--release` build is available for maximum
+scan speed but isn't needed for everyday use.
 
 ## Phase 1: the scanning engine
 
