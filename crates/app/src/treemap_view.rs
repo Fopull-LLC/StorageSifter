@@ -64,15 +64,13 @@ pub struct Interaction {
 }
 
 /// Render the children of `current` (or, during a zoom, the cross-faded parent
-/// and child views). `selection` cells are highlighted; `warn` cells get a
-/// danger outline.
+/// and child views). `selection` cells are highlighted.
 pub fn show(
     ui: &mut egui::Ui,
     tree: &Tree,
     current: NodeId,
     anim: Option<Anim>,
     selection: &HashSet<NodeId>,
-    warn: &HashSet<NodeId>,
 ) -> Interaction {
     let size = ui.available_size();
     let (area, response) = ui.allocate_exact_size(size, Sense::click());
@@ -81,7 +79,6 @@ pub fn show(
 
     let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), theme::TEXT);
     let (char_w, line_h) = (probe.size().x, probe.size().y);
-    let empty: HashSet<NodeId> = HashSet::new();
 
     // --- Animating: cross-fade the parent (zooming) and child (growing) views.
     if let Some(a) = anim {
@@ -101,7 +98,6 @@ pub fn show(
             char_w,
             line_h,
             selection,
-            warn: &empty,
         };
         draw_node_children(&parent, a.parent, &mut sink);
         let child = Paint {
@@ -150,7 +146,6 @@ pub fn show(
         char_w,
         line_h,
         selection,
-        warn,
     };
     let weights: Vec<u64> = children.iter().map(|&id| tree.node(id).size).collect();
     let rects = squarify(&weights, to_layout(area));
@@ -208,7 +203,6 @@ struct Paint<'a> {
     char_w: f32,
     line_h: f32,
     selection: &'a HashSet<NodeId>,
-    warn: &'a HashSet<NodeId>,
 }
 
 fn draw_node_children(ctx: &Paint, node: NodeId, hovered: &mut Option<Hit>) {
@@ -252,18 +246,11 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     }
     if ctx.selection.contains(&id) {
         ctx.painter
-            .rect_filled(drawn, 0, theme::ACCENT.gamma_multiply(0.30 * ctx.alpha));
+            .rect_filled(drawn, 0, theme::ACCENT.gamma_multiply(0.28 * ctx.alpha));
         ctx.painter.rect_stroke(
             drawn,
             0,
             Stroke::new(2.0, theme::ACCENT.gamma_multiply(ctx.alpha)),
-            StrokeKind::Inside,
-        );
-    } else if ctx.warn.contains(&id) {
-        ctx.painter.rect_stroke(
-            drawn,
-            0,
-            Stroke::new(2.0, theme::DANGER.gamma_multiply(ctx.alpha)),
             StrokeKind::Inside,
         );
     }

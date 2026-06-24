@@ -1,22 +1,23 @@
-//! Visual theme: a dark, flat, programmer palette plus *semantic* file-category
+//! Visual theme: a dark, cool, sleek palette plus *semantic* file-category
 //! colors and human-readable size formatting.
 //!
-//! The categories are chosen to answer the question "what is taking up my
-//! space, and is it junk?" at a glance — caches and build artifacts get a loud
-//! amber, media a calm green, applications cyan, and so on.
+//! The palette stays in a cohesive cool family — dark saturated backdrop, near
+//! white text, blues / teals / purples for structure and types, and a single
+//! pink reserved for the one thing you're hunting: reclaimable junk. Red is used
+//! only for destructive actions, never as decoration.
 
 use eframe::egui::{self, Color32};
 use scanner::{NodeId, NodeKind, Tree};
 
-// Core chrome colors. Flat, dark, high-contrast — no gradients.
-pub const BG: Color32 = Color32::from_rgb(0x14, 0x16, 0x1b); // treemap backdrop
-pub const PANEL: Color32 = Color32::from_rgb(0x1b, 0x1f, 0x26); // toolbars
-pub const BORDER: Color32 = Color32::from_rgb(0x0d, 0x0f, 0x13); // hard cell edges
-pub const TEXT: Color32 = Color32::from_rgb(0xc8, 0xcd, 0xd6);
-pub const TEXT_DIM: Color32 = Color32::from_rgb(0x7a, 0x82, 0x90);
-pub const ACCENT: Color32 = Color32::from_rgb(0xe5, 0xc0, 0x7b); // hover / selection
-pub const MOUNT: Color32 = Color32::from_rgb(0x6f, 0xd0, 0xe8); // mount / subvolume edge
-pub const DANGER: Color32 = Color32::from_rgb(0xe5, 0x4b, 0x4b); // delete / unsafe path
+// Core chrome. Dark, faintly indigo, flat — no gradients.
+pub const BG: Color32 = Color32::from_rgb(0x11, 0x13, 0x20); // treemap backdrop
+pub const PANEL: Color32 = Color32::from_rgb(0x19, 0x1c, 0x2b); // toolbars / dialogs
+pub const BORDER: Color32 = Color32::from_rgb(0x0a, 0x0b, 0x12); // subtle cell gaps
+pub const TEXT: Color32 = Color32::from_rgb(0xea, 0xed, 0xf4); // near-white
+pub const TEXT_DIM: Color32 = Color32::from_rgb(0x88, 0x8f, 0xa6); // muted
+pub const ACCENT: Color32 = Color32::from_rgb(0xff, 0x7e, 0xb6); // selection / highlight (pink)
+pub const MOUNT: Color32 = Color32::from_rgb(0x58, 0xd2, 0xc2); // mount / subvolume edge (teal)
+pub const DANGER: Color32 = Color32::from_rgb(0xec, 0x5f, 0x78); // destructive actions only
 
 /// Install the dark theme into the egui context.
 pub fn apply(ctx: &egui::Context) {
@@ -25,27 +26,20 @@ pub fn apply(ctx: &egui::Context) {
     visuals.window_fill = PANEL;
     visuals.extreme_bg_color = BG;
     visuals.override_text_color = Some(TEXT);
+    visuals.selection.bg_fill = ACCENT.gamma_multiply(0.45);
     ctx.set_visuals(visuals);
 }
 
 /// A "what is this" classification, tuned to surface reclaimable space.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Category {
-    /// Caches, build artifacts, temp files — the usual reclaimable garbage.
     Junk,
-    /// Video / audio / images — usually large and usually wanted.
     Media,
-    /// Archives and disk images.
     Archive,
-    /// Applications, installers, libraries, executables.
     App,
-    /// Source code and config.
     Code,
-    /// Documents and text.
     Document,
-    /// A plain folder (nothing more specific).
     Folder,
-    /// Anything else.
     Other,
 }
 
@@ -79,8 +73,7 @@ impl Category {
     /// Classify a node by kind, then by name / extension.
     ///
     /// Junk propagates: anything *inside* a known cache/build directory is junk
-    /// too, so a whole `target/` or `node_modules/` reads as one solid amber
-    /// block — the reclaimable space you're hunting for.
+    /// too, so a whole `target/` or `node_modules/` reads as one solid block.
     pub fn of(tree: &Tree, id: NodeId) -> Category {
         let mut ancestor = Some(id);
         while let Some(node) = ancestor {
@@ -120,18 +113,18 @@ impl Category {
 
     pub fn color(self) -> Color32 {
         match self {
-            Category::Junk => Color32::from_rgb(0xd1, 0x88, 0x3c), // amber — reclaimable
-            Category::Media => Color32::from_rgb(0x9e, 0xce, 0x6a), // green
-            Category::Archive => Color32::from_rgb(0xd1, 0x7f, 0xb0), // pink
-            Category::App => Color32::from_rgb(0x56, 0xb6, 0xc2),  // cyan
-            Category::Code => Color32::from_rgb(0x61, 0xaf, 0xef), // blue
-            Category::Document => Color32::from_rgb(0xe5, 0xc0, 0x7b), // yellow
-            Category::Folder => Color32::from_rgb(0x49, 0x56, 0x6e), // slate
-            Category::Other => Color32::from_rgb(0x5a, 0x62, 0x73), // gray
+            Category::Junk => Color32::from_rgb(0xd9, 0x6a, 0x96), // rose — reclaimable
+            Category::Media => Color32::from_rgb(0x46, 0xc2, 0xa2), // teal-green
+            Category::Archive => Color32::from_rgb(0xc5, 0x6f, 0xd0), // purple-magenta
+            Category::App => Color32::from_rgb(0x9b, 0x7b, 0xea),  // blue-purple
+            Category::Code => Color32::from_rgb(0x6f, 0x8b, 0xf2), // blue
+            Category::Document => Color32::from_rgb(0x54, 0xc2, 0xdd), // cyan
+            Category::Folder => Color32::from_rgb(0x38, 0x45, 0x6a), // dark blue (structural)
+            Category::Other => Color32::from_rgb(0x52, 0x5b, 0x72), // blue-gray
         }
     }
 
-    /// Short, human label for the status bar.
+    /// Short, human label for the status bar / properties.
     pub fn label(self) -> &'static str {
         match self {
             Category::Junk => "cache / junk",
@@ -154,10 +147,10 @@ fn is_junk_dir(name: &str) -> bool {
 /// Pick black or white text for legibility against a filled cell.
 pub fn contrast_text(bg: Color32) -> Color32 {
     let luma = 0.299 * bg.r() as f32 + 0.587 * bg.g() as f32 + 0.114 * bg.b() as f32;
-    if luma > 140.0 {
-        Color32::from_rgb(0x14, 0x16, 0x1b)
+    if luma > 150.0 {
+        Color32::from_rgb(0x11, 0x13, 0x20)
     } else {
-        Color32::from_rgb(0xe8, 0xeb, 0xf0)
+        Color32::from_rgb(0xea, 0xed, 0xf4)
     }
 }
 
