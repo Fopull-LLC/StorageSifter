@@ -136,6 +136,32 @@ impl Tree {
         path_of(&self.nodes, &self.names, id)
     }
 
+    /// Detach `id` (and its subtree) after it has been deleted on disk: unlink
+    /// it from its parent and subtract its size from every ancestor, in
+    /// `O(depth)`. The node stays in the arena but is no longer reachable from
+    /// the root, so it stops rendering. Returns the freed size; a no-op on the
+    /// root.
+    pub fn remove_subtree(&mut self, id: NodeId) -> u64 {
+        let (size, parent) = {
+            let node = &self.nodes[id as usize];
+            (node.size, node.parent)
+        };
+        let Some(parent) = parent else {
+            return 0;
+        };
+        let siblings = &mut self.nodes[parent as usize].children;
+        if let Some(pos) = siblings.iter().position(|&c| c == id) {
+            siblings.remove(pos);
+        }
+        let mut ancestor = Some(parent);
+        while let Some(a) = ancestor {
+            let node = &mut self.nodes[a as usize];
+            node.size = node.size.saturating_sub(size);
+            ancestor = node.parent;
+        }
+        size
+    }
+
     /// Construct a [`Tree`] from already-built parts. Used by the walk module.
     pub(crate) fn new(
         nodes: Vec<Node>,

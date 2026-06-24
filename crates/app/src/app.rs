@@ -1,20 +1,14 @@
-//! The application: a device picker, navigation state, and the three-panel
-//! treemap shell (toolbar / treemap / status bar).
-//!
-//! On launch with no path argument the app shows a **device picker** listing the
-//! mounted filesystems with their used/total space; pick one to scan it. (Each
-//! mount is its own filesystem — on btrfs your `/home`, `/var`, … are separate
-//! subvolumes, which is why scanning `/` only shows the root subvolume.)
-//!
-//! While viewing, navigation is a single `current` node id; the breadcrumb and
-//! "go up" are derived from the scanner's parent pointers, and every change of
-//! `current` cross-fades a short zoom between the two views.
+//! The application: a device picker, navigation, multi-select, file operations,
+//! and the panel shell (toolbar / selection bar / treemap / status bar).
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use eframe::egui::{self, Rect as ERect};
+use scanner::safety::{classify, Class};
 use scanner::{NodeId, NodeKind, Tree};
 
+use crate::ops;
 use crate::scan::Scan;
 use crate::theme::{self, format_size};
 use crate::treemap_view;
@@ -23,23 +17,25 @@ use crate::treemap_view;
 const ANIM_SECS: f64 = 0.22;
 
 pub struct StorageSifterApp {
-    /// Mounted filesystems for the picker.
     disks: Vec<DiskInfo>,
-    /// The active scan, or `None` to show the device picker.
     scan: Option<Scan>,
-    /// The path currently being visualized.
     path: PathBuf,
-    /// The node currently drilled into (root is 0; reset on every scan).
     current: NodeId,
-    /// In-progress zoom, if any.
     anim: Option<AnimState>,
-    /// The treemap rect from last frame, used to locate cells for "go up" zooms.
     last_area: ERect,
-    /// Node under the pointer, refreshed each frame by the treemap view.
     hovered: Option<NodeId>,
+    /// Multi-selected nodes (Ctrl/Shift-click).
+    selection: HashSet<NodeId>,
+    /// Node a context menu is open for.
+    menu: Option<NodeId>,
+    /// The active modal dialog, if any.
+    dialog: Dialog,
+    /// The user's home directory, for safety classification.
+    home: PathBuf,
+    /// Last operation result, shown in the status bar.
+    status: Option<String>,
 }
 
-/// A mounted filesystem shown in the picker.
 struct DiskInfo {
     name: String,
     mount: PathBuf,
@@ -50,15 +46,38 @@ struct DiskInfo {
 
 #[derive(Clone, Copy)]
 struct AnimState {
-    /// The two views being cross-faded, connected at `pivot` (the child's cell
-    /// within the parent's layout). `current` is already the destination.
     parent: NodeId,
     child: NodeId,
     pivot: ERect,
     drilling_in: bool,
-    /// `egui` time when the first frame rendered; stamped lazily so the zoom
-    /// always begins at t = 0 no matter when it was queued.
     start: Option<f64>,
+}
+
+enum Dialog {
+    None,
+    Properties(NodeId),
+    Confirm { ids: Vec<NodeId>, permanent: bool },
+}
+
+enum MenuAction {
+    Properties(NodeId),
+    Reveal(NodeId),
+    Trash(Vec<NodeId>),
+    Delete(Vec<NodeId>),
+}
+
+#[derive(Clone, Copy)]
+enum SelAction {
+    Clear,
+    Trash,
+    Delete,
+}
+
+/// Result of showing the confirm dialog this frame.
+enum Confirm {
+    Open,
+    Cancel,
+    Go,
 }
 
 impl StorageSifterApp {
@@ -75,6 +94,11 @@ impl StorageSifterApp {
             anim: None,
             last_area: ERect::ZERO,
             hovered: None,
+            selection: HashSet::new(),
+            menu: None,
+            dialog: Dialog::None,
+            home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+            status: None,
         }
     }
 
@@ -84,6 +108,9 @@ impl StorageSifterApp {
         self.current = 0;
         self.anim = None;
         self.hovered = None;
+        self.selection.clear();
+        self.dialog = Dialog::None;
+        self.status = None;
     }
 }
 
@@ -102,8 +129,10 @@ impl eframe::App for StorageSifterApp {
         }
 
         self.toolbar(ui);
+        self.selection_bar(ui);
         self.status_bar(ui);
         self.treemap(ui);
+        self.dialogs(ui.ctx());
     }
 }
 
@@ -130,6 +159,13 @@ impl StorageSifterApp {
                         }
                         ui.add_space(6.0);
                     }
+                });
+            });
+            ui.add_space(10.0);
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("A Fopull LLC project  ·").color(theme::TEXT_DIM));
+                    ui.hyperlink_to("fopull.com", "https://fopull.com");
                 });
             });
         });
@@ -180,7 +216,6 @@ impl StorageSifterApp {
         });
     }
 
-    /// Clickable breadcrumb from the scan root down to `current`.
     fn breadcrumb(&mut self, ui: &mut egui::Ui) {
         let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
             ui.monospace(self.path.display().to_string());
@@ -223,6 +258,55 @@ impl StorageSifterApp {
         }
     }
 
+    fn selection_bar(&mut self, ui: &mut egui::Ui) {
+        if self.selection.is_empty() {
+            return;
+        }
+        let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
+            return;
+        };
+        let count = self.selection.len();
+        let total: u64 = self.selection.iter().map(|&id| tree.node(id).size).sum();
+
+        let mut action = None;
+        egui::Panel::top("selection").show_inside(ui, |ui| {
+            ui.add_space(3.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(format!("{count} selected")).color(theme::ACCENT).strong());
+                ui.label(egui::RichText::new(format!("·  {}", format_size(total))).color(theme::TEXT_DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Clear").clicked() {
+                        action = Some(SelAction::Clear);
+                    }
+                    let del = egui::Button::new(
+                        egui::RichText::new("Delete…").color(egui::Color32::WHITE),
+                    )
+                    .fill(theme::DANGER);
+                    if ui.add(del).clicked() {
+                        action = Some(SelAction::Delete);
+                    }
+                    if ui.button("Move to Trash…").clicked() {
+                        action = Some(SelAction::Trash);
+                    }
+                });
+            });
+            ui.add_space(3.0);
+        });
+
+        match action {
+            Some(SelAction::Clear) => self.selection.clear(),
+            Some(SelAction::Trash) | Some(SelAction::Delete) => {
+                let permanent = matches!(action, Some(SelAction::Delete));
+                let ids: Vec<NodeId> = self.selection.iter().copied().collect();
+                match prepare_delete(tree, &self.home, ids, permanent) {
+                    Ok(dialog) => self.dialog = dialog,
+                    Err(msg) => self.status = Some(msg),
+                }
+            }
+            None => {}
+        }
+    }
+
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("status").show_inside(ui, |ui| {
             ui.add_space(2.0);
@@ -242,14 +326,15 @@ impl StorageSifterApp {
                     if node.is_hardlinked() {
                         ui.label(egui::RichText::new("·  hardlinked").color(theme::ACCENT));
                     }
+                    if let Some(warn) = safety_note(classify(&tree.path(id), &self.home)) {
+                        ui.label(egui::RichText::new(warn).color(theme::DANGER));
+                    }
                 }
-                (Some(Scan::Done { tree, .. }), None) => {
-                    let n = tree.unreadable.len();
-                    let hint = if n == 0 {
-                        "click a folder to drill in · Backspace/Esc to go up".to_owned()
-                    } else {
-                        format!("click to drill · Backspace to go up · {n} unreadable path(s)")
-                    };
+                (Some(Scan::Done { .. }), None) => {
+                    let hint = self.status.clone().unwrap_or_else(|| {
+                        "click to drill · Ctrl/Shift-click to select · right-click for actions"
+                            .to_owned()
+                    });
                     ui.label(egui::RichText::new(hint).color(theme::TEXT_DIM));
                 }
                 _ => {
@@ -276,7 +361,6 @@ impl StorageSifterApp {
 
             let now = ui.ctx().input(|i| i.time);
 
-            // Keyboard: go up a level (zoom out of the cell we leave).
             let go_up = ui
                 .ctx()
                 .input(|i| i.key_pressed(egui::Key::Backspace) || i.key_pressed(egui::Key::Escape));
@@ -295,7 +379,6 @@ impl StorageSifterApp {
                 }
             }
 
-            // Advance the cross-fade; clear when it finishes.
             let anim = if let Some(a) = &mut self.anim {
                 let start = *a.start.get_or_insert(now);
                 let t = (now - start) / ANIM_SECS;
@@ -317,29 +400,230 @@ impl StorageSifterApp {
                 self.anim = None;
             }
 
-            let it = treemap_view::show(ui, tree, self.current, anim);
+            // Flag top-level cells that are system / outside-home locations.
+            let warn: HashSet<NodeId> = if anim.is_none() {
+                tree.node(self.current)
+                    .children
+                    .iter()
+                    .copied()
+                    .filter(|&c| safety_note(classify(&tree.path(c), &self.home)).is_some())
+                    .collect()
+            } else {
+                HashSet::new()
+            };
+
+            let it = treemap_view::show(ui, tree, self.current, anim, &self.selection, &warn);
             self.last_area = it.area;
             self.hovered = it.hovered.map(|h| h.id);
 
-            // Drill into the clicked folder: cross-fade into it.
             if let Some(hit) = it.clicked {
-                let node = tree.node(hit.id);
-                if node.kind == NodeKind::Dir && !node.children.is_empty() {
-                    self.anim = Some(AnimState {
-                        parent: self.current,
-                        child: hit.id,
-                        pivot: hit.rect,
-                        drilling_in: true,
-                        start: None,
-                    });
-                    self.current = hit.id;
+                if it.modified {
+                    let target = it.hovered.map(|h| h.id).unwrap_or(hit.id);
+                    if !self.selection.insert(target) {
+                        self.selection.remove(&target);
+                    }
+                    self.status = None;
+                } else {
+                    let node = tree.node(hit.id);
+                    if node.kind == NodeKind::Dir && !node.children.is_empty() {
+                        self.anim = Some(AnimState {
+                            parent: self.current,
+                            child: hit.id,
+                            pivot: hit.rect,
+                            drilling_in: true,
+                            start: None,
+                        });
+                        self.current = hit.id;
+                    }
                 }
+            }
+            if let Some(hit) = it.secondary {
+                self.menu = Some(hit.id);
+            }
+
+            let mut menu_action = None;
+            it.response.context_menu(|ui| {
+                if let Some(target) = self.menu {
+                    menu_action = context_menu_items(ui, tree, target, &self.selection);
+                }
+            });
+            match menu_action {
+                Some(MenuAction::Properties(id)) => self.dialog = Dialog::Properties(id),
+                Some(MenuAction::Reveal(id)) => ops::reveal(&tree.path(id)),
+                Some(MenuAction::Trash(ids)) => match prepare_delete(tree, &self.home, ids, false) {
+                    Ok(dialog) => self.dialog = dialog,
+                    Err(msg) => self.status = Some(msg),
+                },
+                Some(MenuAction::Delete(ids)) => match prepare_delete(tree, &self.home, ids, true) {
+                    Ok(dialog) => self.dialog = dialog,
+                    Err(msg) => self.status = Some(msg),
+                },
+                None => {}
             }
 
             if self.anim.is_some() {
                 ui.ctx().request_repaint();
             }
         });
+    }
+
+    fn dialogs(&mut self, ctx: &egui::Context) {
+        let dialog = std::mem::replace(&mut self.dialog, Dialog::None);
+        match dialog {
+            Dialog::None => {}
+            Dialog::Properties(id) => {
+                if self.show_properties(ctx, id) {
+                    self.dialog = Dialog::Properties(id);
+                }
+            }
+            Dialog::Confirm { ids, permanent } => match self.show_confirm(ctx, &ids, permanent) {
+                Confirm::Open => self.dialog = Dialog::Confirm { ids, permanent },
+                Confirm::Cancel => {}
+                Confirm::Go => self.execute_delete(ids, permanent),
+            },
+        }
+    }
+
+    fn show_properties(&self, ctx: &egui::Context, id: NodeId) -> bool {
+        let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
+            return false;
+        };
+        let node = tree.node(id);
+        let path = tree.path(id);
+        let mut keep = true;
+        let response = egui::Modal::new(egui::Id::new("properties")).show(ctx, |ui| {
+            ui.set_width(480.0);
+            ui.heading("Properties");
+            ui.add_space(6.0);
+            egui::Grid::new("props")
+                .num_columns(2)
+                .spacing([14.0, 6.0])
+                .show(ui, |ui| {
+                    prop_row(ui, "Path", path.display().to_string());
+                    prop_row(ui, "On disk", format_size(node.size));
+                    prop_row(ui, "Category", theme::Category::of(tree, id).label().to_owned());
+                    prop_row(ui, "Kind", kind_label(node.kind).to_owned());
+                    if node.kind == NodeKind::Dir {
+                        prop_row(ui, "Items", node.children.len().to_string());
+                    }
+                    if node.is_hardlinked() {
+                        prop_row(ui, "Hard links", node.nlink.to_string());
+                    }
+                    if node.is_mountpoint() {
+                        prop_row(ui, "Mount", "subvolume / mount point".to_owned());
+                    }
+                    prop_row(ui, "Safety", class_label(classify(&path, &self.home)).to_owned());
+                });
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Reveal in file manager").clicked() {
+                    ops::reveal(&path);
+                }
+                if ui.button("Close").clicked() {
+                    keep = false;
+                }
+            });
+        });
+        if response.should_close() {
+            keep = false;
+        }
+        keep
+    }
+
+    fn show_confirm(&self, ctx: &egui::Context, ids: &[NodeId], permanent: bool) -> Confirm {
+        let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
+            return Confirm::Cancel;
+        };
+        let total: u64 = ids.iter().map(|&id| tree.node(id).size).sum();
+        let outside = ids
+            .iter()
+            .filter(|&&id| safety_note(classify(&tree.path(id), &self.home)).is_some())
+            .count();
+
+        let mut result = Confirm::Open;
+        let response = egui::Modal::new(egui::Id::new("confirm")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            let title = if permanent {
+                "Delete permanently"
+            } else {
+                "Move to Trash"
+            };
+            ui.heading(
+                egui::RichText::new(title)
+                    .color(if permanent { theme::DANGER } else { theme::TEXT }),
+            );
+            ui.add_space(6.0);
+            ui.label(format!("{} item(s)  ·  {} total", ids.len(), format_size(total)));
+            ui.add_space(4.0);
+            egui::ScrollArea::vertical().max_height(170.0).show(ui, |ui| {
+                for &id in ids.iter().take(15) {
+                    ui.monospace(tree.path(id).display().to_string());
+                }
+                if ids.len() > 15 {
+                    ui.label(format!("… and {} more", ids.len() - 15));
+                }
+            });
+            ui.add_space(8.0);
+            if permanent {
+                ui.label(egui::RichText::new("This cannot be undone.").color(theme::DANGER).strong());
+            } else {
+                ui.label(
+                    egui::RichText::new("Items can be restored from the trash.")
+                        .color(theme::TEXT_DIM),
+                );
+            }
+            if outside > 0 {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "⚠  {outside} item(s) are outside your home directory."
+                    ))
+                    .color(theme::DANGER),
+                );
+            }
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    result = Confirm::Cancel;
+                }
+                let go = if permanent {
+                    "Delete permanently"
+                } else {
+                    "Move to Trash"
+                };
+                let button = egui::Button::new(egui::RichText::new(go).color(egui::Color32::WHITE))
+                    .fill(if permanent { theme::DANGER } else { theme::Category::App.color() });
+                if ui.add(button).clicked() {
+                    result = Confirm::Go;
+                }
+            });
+        });
+        if response.should_close() && matches!(result, Confirm::Open) {
+            result = Confirm::Cancel;
+        }
+        result
+    }
+
+    fn execute_delete(&mut self, ids: Vec<NodeId>, permanent: bool) {
+        let Some(Scan::Done { tree, .. }) = &mut self.scan else {
+            return;
+        };
+        let targets: Vec<(PathBuf, u64)> = ids
+            .iter()
+            .map(|&id| (tree.path(id), tree.node(id).size))
+            .collect();
+        let mode = if permanent {
+            ops::Mode::Delete
+        } else {
+            ops::Mode::Trash
+        };
+        let report = ops::perform(&targets, mode);
+        for (&id, (path, _)) in ids.iter().zip(&targets) {
+            if report.succeeded.contains(path) {
+                tree.remove_subtree(id);
+            }
+        }
+        self.status = Some(report.summary());
+        self.selection.clear();
     }
 }
 
@@ -379,7 +663,133 @@ fn disk_row(ui: &mut egui::Ui, disk: &DiskInfo) -> egui::Response {
         .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// Enumerate mounted filesystems with real capacity.
+/// Build the right-click context menu; returns the action chosen, if any.
+fn context_menu_items(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    target: NodeId,
+    selection: &HashSet<NodeId>,
+) -> Option<MenuAction> {
+    // Operate on the whole selection if the clicked cell is part of it.
+    let ids: Vec<NodeId> = if selection.contains(&target) {
+        selection.iter().copied().collect()
+    } else {
+        vec![target]
+    };
+    let n = ids.len();
+
+    let mut action = None;
+    ui.label(egui::RichText::new(tree.name(target)).strong());
+    ui.separator();
+    if ui.button("Properties").clicked() {
+        action = Some(MenuAction::Properties(target));
+        ui.close();
+    }
+    if ui.button("Reveal in file manager").clicked() {
+        action = Some(MenuAction::Reveal(target));
+        ui.close();
+    }
+    ui.separator();
+    let trash = if n > 1 {
+        format!("Move {n} items to Trash")
+    } else {
+        "Move to Trash".to_owned()
+    };
+    if ui.button(trash).clicked() {
+        action = Some(MenuAction::Trash(ids.clone()));
+        ui.close();
+    }
+    let delete = if n > 1 {
+        format!("Delete {n} items permanently…")
+    } else {
+        "Delete permanently…".to_owned()
+    };
+    if ui
+        .button(egui::RichText::new(delete).color(theme::DANGER))
+        .clicked()
+    {
+        action = Some(MenuAction::Delete(ids));
+        ui.close();
+    }
+    action
+}
+
+/// Filter `ids` down to those with no selected ancestor (so deleting a folder
+/// and something inside it doesn't double-count or fail).
+fn independent_nodes(tree: &Tree, ids: Vec<NodeId>) -> Vec<NodeId> {
+    let set: HashSet<NodeId> = ids.iter().copied().collect();
+    ids.into_iter()
+        .filter(|&id| {
+            let mut ancestor = tree.node(id).parent;
+            while let Some(a) = ancestor {
+                if set.contains(&a) {
+                    return false;
+                }
+                ancestor = tree.node(a).parent;
+            }
+            true
+        })
+        .collect()
+}
+
+/// Prepare a delete: dedup nested selections and refuse critical paths.
+fn prepare_delete(
+    tree: &Tree,
+    home: &std::path::Path,
+    ids: Vec<NodeId>,
+    permanent: bool,
+) -> Result<Dialog, String> {
+    let ids = independent_nodes(tree, ids);
+    if ids.is_empty() {
+        return Err("Nothing to delete".to_owned());
+    }
+    for &id in &ids {
+        let path = tree.path(id);
+        if classify(&path, home) == Class::Critical {
+            return Err(format!(
+                "Refused — {} is a protected system location",
+                path.display()
+            ));
+        }
+    }
+    Ok(Dialog::Confirm { ids, permanent })
+}
+
+fn prop_row(ui: &mut egui::Ui, key: &str, value: String) {
+    ui.label(egui::RichText::new(key).color(theme::TEXT_DIM));
+    ui.monospace(value);
+    ui.end_row();
+}
+
+fn kind_label(kind: NodeKind) -> &'static str {
+    match kind {
+        NodeKind::Dir => "Folder",
+        NodeKind::File => "File",
+        NodeKind::Symlink => "Symlink",
+        NodeKind::Other => "Special file",
+    }
+}
+
+fn class_label(class: Class) -> &'static str {
+    match class {
+        Class::Normal => "in home directory",
+        Class::OutsideHome => "outside home directory",
+        Class::System => "system location",
+        Class::Critical => "protected (cannot delete)",
+    }
+}
+
+/// A short status-bar warning for a non-normal safety class.
+fn safety_note(class: Class) -> Option<&'static str> {
+    match class {
+        Class::Normal => None,
+        Class::OutsideHome => Some("·  ⚠ outside home"),
+        Class::System => Some("·  ⚠ system"),
+        Class::Critical => Some("·  ⛔ protected"),
+    }
+}
+
+/// Enumerate mounted filesystems with real capacity, one row per device.
 fn list_disks() -> Vec<DiskInfo> {
     let disks = sysinfo::Disks::new_with_refreshed_list();
     let mut out: Vec<DiskInfo> = disks
@@ -394,8 +804,6 @@ fn list_disks() -> Vec<DiskInfo> {
             available: d.available_space(),
         })
         .collect();
-    // One entry per physical device: btrfs mounts every subvolume separately
-    // (/, /home, /var, …) on the same device, so collapse to the shortest mount.
     out.sort_by(|a, b| {
         a.name
             .cmp(&b.name)
@@ -406,8 +814,7 @@ fn list_disks() -> Vec<DiskInfo> {
     out
 }
 
-/// The child of `target` on the path up from `from`, plus its screen rect in
-/// `target`'s layout — the pivot cell for a zoom-out.
+/// The child of `target` on the path up from `from`, plus its screen rect.
 fn zoom_out_pivot(tree: &Tree, from: NodeId, target: NodeId, area: ERect) -> Option<(NodeId, ERect)> {
     let mut node = from;
     while let Some(parent) = tree.node(node).parent {

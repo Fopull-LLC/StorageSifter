@@ -2,17 +2,19 @@
 //!
 //! Lays out a node's children with the `treemap` crate and paints them with the
 //! egui `Painter`: flat category-colored cells, hard 1px borders, ellipsized
-//! labels, and one level of nested preview inside directories.
+//! labels, one level of nested preview, selection highlights, and a danger
+//! outline on flagged (system) top-level cells.
 //!
-//! The zoom is a **cross-fade between two views**: during a transition the
-//! parent view is rendered zooming *into* the pivot cell (and fading out) while
-//! the child view is rendered growing *out of* the pivot cell (and fading in).
-//! Because the child view ends exactly at its settled full-screen layout, there
-//! is no snap when the animation completes — it morphs the whole way.
+//! The zoom is a cross-fade between two views (parent zooming in, child growing
+//! out), so it morphs continuously with no snap at the end.
 //!
-//! Two interaction results are reported when idle: the *innermost* cell under
-//! the pointer (status bar) and, on a click, the *top-level* child clicked (the
-//! drill-down target — one level per click).
+//! Interaction (when idle) is reported as: the innermost cell hovered (status
+//! bar), the top-level child left-clicked (drill, one level per click), whether
+//! a modifier was held (select instead of drill), and the innermost cell
+//! right-clicked (context menu). The treemap's `Response` is returned so the
+//! caller can attach a context menu to it.
+
+use std::collections::HashSet;
 
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, StrokeKind, Vec2};
 use scanner::{NodeId, NodeKind, Tree};
@@ -35,15 +37,13 @@ pub struct Hit {
 }
 
 /// One frame of an in-progress zoom between `parent` and `child`, connected at
-/// the `pivot` cell (the child's rectangle within the parent's layout).
+/// the `pivot` cell.
 #[derive(Clone, Copy)]
 pub struct Anim {
     pub parent: NodeId,
     pub child: NodeId,
     pub pivot: ERect,
-    /// Eased progress in `0.0..=1.0`.
     pub e: f32,
-    /// `true` = drilling in (parent → child); `false` = zooming out (child → parent).
     pub drilling_in: bool,
 }
 
@@ -51,15 +51,29 @@ pub struct Anim {
 pub struct Interaction {
     /// Innermost cell under the pointer — for inspection in the status bar.
     pub hovered: Option<Hit>,
-    /// Top-level child clicked — the drill-down target (one level per click).
+    /// Top-level child left-clicked — the drill-down target.
     pub clicked: Option<Hit>,
-    /// The rect the treemap filled, so the caller can locate cells next frame.
+    /// Whether Ctrl/Shift was held during the click (→ select instead of drill).
+    pub modified: bool,
+    /// Innermost cell right-clicked — the context-menu target.
+    pub secondary: Option<Hit>,
+    /// The treemap's response, for attaching a context menu.
+    pub response: egui::Response,
+    /// The rect the treemap filled.
     pub area: ERect,
 }
 
 /// Render the children of `current` (or, during a zoom, the cross-faded parent
-/// and child views) filling the available space.
-pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>) -> Interaction {
+/// and child views). `selection` cells are highlighted; `warn` cells get a
+/// danger outline.
+pub fn show(
+    ui: &mut egui::Ui,
+    tree: &Tree,
+    current: NodeId,
+    anim: Option<Anim>,
+    selection: &HashSet<NodeId>,
+    warn: &HashSet<NodeId>,
+) -> Interaction {
     let size = ui.available_size();
     let (area, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter_at(area);
@@ -67,6 +81,7 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
 
     let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), theme::TEXT);
     let (char_w, line_h) = (probe.size().x, probe.size().y);
+    let empty: HashSet<NodeId> = HashSet::new();
 
     // --- Animating: cross-fade the parent (zooming) and child (growing) views.
     if let Some(a) = anim {
@@ -85,6 +100,8 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
             hover_pos: None,
             char_w,
             line_h,
+            selection,
+            warn: &empty,
         };
         draw_node_children(&parent, a.parent, &mut sink);
         let child = Paint {
@@ -96,6 +113,9 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
         return Interaction {
             hovered: None,
             clicked: None,
+            modified: false,
+            secondary: None,
+            response,
             area,
         };
     }
@@ -113,6 +133,9 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
         return Interaction {
             hovered: None,
             clicked: None,
+            modified: false,
+            secondary: None,
+            response,
             area,
         };
     }
@@ -126,6 +149,8 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
         hover_pos: response.hover_pos(),
         char_w,
         line_h,
+        selection,
+        warn,
     };
     let weights: Vec<u64> = children.iter().map(|&id| tree.node(id).size).collect();
     let rects = squarify(&weights, to_layout(area));
@@ -134,6 +159,10 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
         draw_cell(&ctx, id, *rect, NEST_PREVIEW, &mut hovered);
     }
 
+    let modifiers = ui.input(|i| i.modifiers);
+    let modified = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
+
+    // Left click targets the top-level child it landed in (one level per click).
     let clicked = if response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             children
@@ -146,16 +175,19 @@ pub fn show(ui: &mut egui::Ui, tree: &Tree, current: NodeId, anim: Option<Anim>)
     } else {
         None
     };
+    let secondary = if response.secondary_clicked() { hovered } else { None };
 
     Interaction {
         hovered,
         clicked,
+        modified,
+        secondary,
+        response,
         area,
     }
 }
 
-/// The screen rect a given `child` of `parent` would occupy in `area`. Used to
-/// find the pivot cell when zooming out.
+/// The screen rect a given `child` of `parent` would occupy in `area`.
 pub fn child_rect(tree: &Tree, parent: NodeId, child: NodeId, area: ERect) -> Option<ERect> {
     let kids = sorted_children(tree, parent);
     let idx = kids.iter().position(|&k| k == child)?;
@@ -169,14 +201,14 @@ pub fn child_rect(tree: &Tree, parent: NodeId, child: NodeId, area: ERect) -> Op
 struct Paint<'a> {
     painter: &'a egui::Painter,
     tree: &'a Tree,
-    /// Layout area (children are squarified into this, then mapped by `xform`).
     area: ERect,
     xform: Xform,
-    /// Opacity multiplier for the whole view (for cross-fades).
     alpha: f32,
     hover_pos: Option<Pos2>,
     char_w: f32,
     line_h: f32,
+    selection: &'a HashSet<NodeId>,
+    warn: &'a HashSet<NodeId>,
 }
 
 fn draw_node_children(ctx: &Paint, node: NodeId, hovered: &mut Option<Hit>) {
@@ -192,7 +224,7 @@ fn draw_node_children(ctx: &Paint, node: NodeId, hovered: &mut Option<Hit>) {
 }
 
 fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Option<Hit>) {
-    let rect = to_screen(layout); // untransformed (full-layout) coords
+    let rect = to_screen(layout);
     if rect.width() < MIN_CELL || rect.height() < MIN_CELL {
         return;
     }
@@ -211,7 +243,6 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
         StrokeKind::Inside,
     );
     if node.is_mountpoint() {
-        // Make subvolume / mount boundaries unmistakable.
         ctx.painter.rect_stroke(
             drawn,
             0,
@@ -219,9 +250,24 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
             StrokeKind::Inside,
         );
     }
+    if ctx.selection.contains(&id) {
+        ctx.painter
+            .rect_filled(drawn, 0, theme::ACCENT.gamma_multiply(0.30 * ctx.alpha));
+        ctx.painter.rect_stroke(
+            drawn,
+            0,
+            Stroke::new(2.0, theme::ACCENT.gamma_multiply(ctx.alpha)),
+            StrokeKind::Inside,
+        );
+    } else if ctx.warn.contains(&id) {
+        ctx.painter.rect_stroke(
+            drawn,
+            0,
+            Stroke::new(2.0, theme::DANGER.gamma_multiply(ctx.alpha)),
+            StrokeKind::Inside,
+        );
+    }
 
-    // Hit-test against the untransformed rect (only consulted when idle, where
-    // `xform` is the identity, so the two coincide).
     if let Some(p) = ctx.hover_pos {
         if rect.contains(p) {
             *hovered = Some(Hit { id, rect });
@@ -257,8 +303,7 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     }
 }
 
-/// Draw `name` (plus size if there is room), ellipsized to fit `area`. Always
-/// shows *something* if even two characters fit — never a blank box.
+/// Draw `name` (plus size if there is room), ellipsized to fit `area`.
 fn draw_label(ctx: &Paint, area: ERect, name: &str, size: u64, color: Color32) {
     let inner = area.shrink(4.0);
     if ctx.char_w <= 0.0 || inner.width() < ctx.char_w * 2.0 || inner.height() < ctx.line_h {
@@ -308,8 +353,7 @@ fn to_screen(r: Rect) -> ERect {
 }
 
 /// Affine map of one rectangle (`src`) onto another (`dst`). Identity when
-/// `src == dst`. A shrinking `src` zooms the view in; a shrinking `dst` shrinks
-/// the view into a cell.
+/// `src == dst`.
 #[derive(Clone, Copy)]
 struct Xform {
     src: ERect,

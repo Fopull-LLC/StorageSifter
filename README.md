@@ -5,9 +5,12 @@ A fast, lightweight disk-usage visualizer for Linux. It maps a filesystem as a
 consume — so the biggest space hogs are obvious at a glance. Think SpaceSniffer,
 but native, GPU-accelerated, and built for a single Linux machine.
 
-> Status: early development. Phases 0–4 are in place — the scanning engine, the
-> squarified layout, and an interactive treemap UI with click-to-drill, a
-> breadcrumb, and animated zoom. File operations (select / trash / delete) are next.
+A free and open-source project by **[Fopull LLC](https://fopull.com)**.
+
+> Status: early development. Phases 0–5 are in place — scanning engine,
+> squarified layout, interactive treemap (drill-down, breadcrumb, animated zoom),
+> a device picker, and file operations (multi-select, move to trash, permanent
+> delete) with safety guardrails.
 
 ## Architecture
 
@@ -85,6 +88,12 @@ archives pink. One level of nested preview is drawn inside each folder.
   scans the whole filesystem and **crosses btrfs subvolumes** (`/home`, `/var`,
   …) — which are outlined in cyan so the boundaries are obvious. (Scanning a path
   directly still stays on its single filesystem, matching `du -x`.)
+- **Ctrl/Shift-click** cells to build a multi-selection; a bar shows the count
+  and total reclaimable size, with **Move to Trash / Delete / Clear**.
+- **Right-click** any cell for **Properties**, **Reveal in file manager**, or to
+  delete. The trash is the default (reversible); every delete is confirmed, and
+  permanent deletes — or anything outside your home directory — are flagged in
+  the dialog. Protected system roots are refused outright.
 
 The first build pulls in the GUI stack and takes a few minutes; after that,
 rebuilds of the app are seconds. A `--release` build is available for maximum
@@ -119,6 +128,11 @@ locate the discrepancy.
 Built for one machine (CachyOS / Linux). It uses Linux-specific APIs directly and
 does not carry cross-platform abstractions.
 
+## About
+
+StorageSifter is a free and open-source product of **Fopull LLC** — a software
+studio by Ty Johnston. More projects at **[fopull.com](https://fopull.com)**.
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 Fopull LLC

@@ -8,6 +8,7 @@
 //! Usage: `storagesifter [PATH]`
 
 mod app;
+mod ops;
 mod scan;
 mod theme;
 mod treemap_view;
