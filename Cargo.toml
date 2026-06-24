@@ -7,8 +7,10 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/fopull/StorageSifter"
 
-# Release profile tuned for fast scans and smooth rendering.
+# Release profile: optimized, but kept light to compile. `codegen-units = 1`
+# and LTO were dropped — for an I/O-bound scanner plus a GPU renderer their
+# runtime benefit is negligible, while they made the large GUI dependency tree
+# very slow and memory-hungry to build (enough to thrash swap and deadlock a
+# parallel build). Plain opt-level = 3 is more than enough here.
 [profile.release]
 opt-level = 3
-lto = "thin"
-codegen-units = 1
