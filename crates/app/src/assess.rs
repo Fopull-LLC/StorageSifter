@@ -128,12 +128,66 @@ static CATALOG: &[Tool] = &[
     },
     // ---- System caches & logs: reclaimable, but root + a proper tool. ----
     Tool {
-        needles: &["/var/cache/pacman/pkg"],
+        needles: &["/var/cache/pacman"],
         marker: None,
         kind: "Pacman package cache",
         verdict: Verdict::Likely,
         detail: "Downloaded packages kept so you can reinstall or roll back. The space is reclaimable — trim it safely with paccache (which keeps the most recent versions) instead of deleting everything.",
-        command: Some("sudo paccache -r        # or: sudo pacman -Sc"),
+        command: Some("sudo paccache -r        # or, to remove all: sudo pacman -Sc"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/cache/apt"],
+        marker: None,
+        kind: "APT package cache",
+        verdict: Verdict::Likely,
+        detail: "Downloaded .deb packages kept by APT. The space is reclaimable — clear it with apt rather than deleting the files by hand.",
+        command: Some("sudo apt clean"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/cache/dnf", "/var/cache/yum"],
+        marker: None,
+        kind: "DNF / YUM package cache",
+        verdict: Verdict::Likely,
+        detail: "Downloaded packages and metadata kept by DNF/YUM. Reclaimable — clear it with the package manager.",
+        command: Some("sudo dnf clean all        # or: sudo yum clean all"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/cache/zypp"],
+        marker: None,
+        kind: "Zypper package cache",
+        verdict: Verdict::Likely,
+        detail: "Downloaded packages kept by zypper. Reclaimable — clear it with zypper.",
+        command: Some("sudo zypper clean --all"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/cache/apk"],
+        marker: None,
+        kind: "apk package cache",
+        verdict: Verdict::Likely,
+        detail: "Downloaded packages kept by apk (Alpine). Reclaimable — clear it with apk.",
+        command: Some("sudo apk cache clean"),
+        root: true,
+    },
+    Tool {
+        needles: &["/var/cache/distfiles", "/var/cache/binpkgs"],
+        marker: None,
+        kind: "Portage cache (Gentoo)",
+        verdict: Verdict::Likely,
+        detail: "Source tarballs and binary packages cached by Portage. Reclaimable — trim with eclean.",
+        command: Some("sudo eclean-dist        # from gentoolkit"),
+        root: true,
+    },
+    Tool {
+        needles: &["/nix/store"],
+        marker: None,
+        kind: "Nix store",
+        verdict: Verdict::Caution,
+        detail: "The Nix package store. Never delete entries by hand — it will break installed software. Reclaim space by collecting garbage, which removes only paths nothing references.",
+        command: Some("nix-collect-garbage -d"),
         root: true,
     },
     Tool {
@@ -170,15 +224,6 @@ static CATALOG: &[Tool] = &[
         verdict: Verdict::Caution,
         detail: "Snap packages and their retained old revisions. Remove snaps you don't use and reduce how many old revisions are kept.",
         command: Some("sudo snap set system refresh.retain=2"),
-        root: true,
-    },
-    Tool {
-        needles: &["/var/cache"],
-        marker: None,
-        kind: "System cache",
-        verdict: Verdict::Likely,
-        detail: "Cache the system rebuilds on demand, so the space is reclaimable — but it lives in a system location and is best cleared through the owning tool (e.g. your package manager) rather than by hand.",
-        command: None,
         root: true,
     },
     Tool {
@@ -519,6 +564,99 @@ fn recognize(tree: &Tree, id: NodeId, path_lower: &str) -> Option<&'static Tool>
     })
 }
 
+/// A system package manager we can detect and recommend a clean command for, so
+/// the report's advice fits the user's actual distro rather than assuming one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PkgManager {
+    Pacman,
+    Apt,
+    Dnf,
+    Zypper,
+    Apk,
+    Xbps,
+    Portage,
+    Nix,
+}
+
+impl PkgManager {
+    fn binary(self) -> &'static str {
+        match self {
+            PkgManager::Pacman => "pacman",
+            PkgManager::Apt => "apt",
+            PkgManager::Dnf => "dnf",
+            PkgManager::Zypper => "zypper",
+            PkgManager::Apk => "apk",
+            PkgManager::Xbps => "xbps-install",
+            PkgManager::Portage => "emerge",
+            PkgManager::Nix => "nix-env",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            PkgManager::Pacman => "pacman",
+            PkgManager::Apt => "apt",
+            PkgManager::Dnf => "dnf",
+            PkgManager::Zypper => "zypper",
+            PkgManager::Apk => "apk",
+            PkgManager::Xbps => "xbps",
+            PkgManager::Portage => "portage",
+            PkgManager::Nix => "nix",
+        }
+    }
+
+    /// The command that frees package-cache space cleanly.
+    fn clean_cmd(self) -> &'static str {
+        match self {
+            PkgManager::Pacman => {
+                "sudo pacman -Sc        # or, keeping recent versions: sudo paccache -r"
+            }
+            PkgManager::Apt => "sudo apt clean",
+            PkgManager::Dnf => "sudo dnf clean all",
+            PkgManager::Zypper => "sudo zypper clean --all",
+            PkgManager::Apk => "sudo apk cache clean",
+            PkgManager::Xbps => "sudo xbps-remove -O",
+            PkgManager::Portage => "sudo eclean-dist        # from gentoolkit",
+            PkgManager::Nix => "nix-collect-garbage -d",
+        }
+    }
+}
+
+const PKG_BIN_DIRS: &[&str] = &["/usr/bin", "/bin", "/usr/local/bin", "/sbin", "/usr/sbin"];
+const ALL_PKG_MANAGERS: &[PkgManager] = &[
+    PkgManager::Pacman,
+    PkgManager::Apt,
+    PkgManager::Dnf,
+    PkgManager::Zypper,
+    PkgManager::Apk,
+    PkgManager::Xbps,
+    PkgManager::Portage,
+    PkgManager::Nix,
+];
+
+/// Detect installed system package managers by probing for their binaries.
+/// A one-time handful of `stat`s — call once at startup and reuse the result;
+/// it is intentionally *not* called from [`assess`], which stays fs-free.
+pub fn detect_package_managers() -> Vec<PkgManager> {
+    ALL_PKG_MANAGERS
+        .iter()
+        .copied()
+        .filter(|pm| {
+            PKG_BIN_DIRS
+                .iter()
+                .any(|d| Path::new(d).join(pm.binary()).exists())
+        })
+        .collect()
+}
+
+/// A human label for the detected managers, e.g. "pacman" or "apt, nix".
+fn pm_labels(pkgs: &[PkgManager]) -> String {
+    pkgs.iter()
+        .map(|p| p.label())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 const CRED_DIRS: &[&str] = &[
     ".ssh",
     ".gnupg",
@@ -541,8 +679,10 @@ const PROJECT_MARKERS: &[&str] = &[
     ".git",
 ];
 
-/// Analyze whether `id` is safe to delete. Pure, in-memory, bounded.
-pub fn assess(tree: &Tree, id: NodeId, home: &Path) -> Assessment {
+/// Analyze whether `id` is safe to delete. Pure, in-memory, bounded. `pkgs` is
+/// the once-detected list of system package managers (see
+/// [`detect_package_managers`]) used to tailor system-cache cleanup advice.
+pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Assessment {
     let node = tree.node(id);
     let path = tree.path(id);
     // Use the path's basename, not the raw node name: the scanner stores the
@@ -612,13 +752,24 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path) -> Assessment {
     if category == Category::Junk {
         if class == Class::System {
             points.push(Point::good("Cache / regenerated data — the space is reclaimable"));
-            points.push(Point::bad(
-                "System-managed — clearing it by hand usually needs root",
-            ));
+            points.push(Point::bad("System-managed — clearing it usually needs root"));
+            // Tailor the advice to whatever package manager is actually
+            // installed, so the guidance is right on any distro.
+            if let Some(pm) = pkgs.first().copied() {
+                points.push(Point::good(format!("Your package manager: {}", pm_labels(pkgs))));
+                let mut report = finish(
+                    Verdict::Likely,
+                    "System cache",
+                    "Cache the system rebuilds on demand, so the space is reclaimable. It lives in a system location, so clear it with your package manager rather than deleting the files by hand.",
+                    points,
+                );
+                report.command = Some(pm.clean_cmd().to_owned());
+                return report;
+            }
             return finish(
                 Verdict::Likely,
                 "System cache",
-                "This is cache the system rebuilds on demand, so the space is reclaimable — but it sits in a system location. Prefer your package manager's clean command (on Arch / CachyOS, `paccache -r` or `pacman -Sc` clears the package cache) rather than deleting these files by hand.",
+                "Cache the system rebuilds on demand, so the space is reclaimable — but it sits in a system location and is best cleared through the owning tool (e.g. your package manager) rather than by hand.",
                 points,
             );
         }
@@ -953,7 +1104,7 @@ mod tests {
         make(dir.path());
         let tree = scan(dir.path()).unwrap();
         let id = child(&tree, name);
-        assess(&tree, id, Path::new(NOWHERE)).verdict
+        assess(&tree, id, Path::new(NOWHERE), &[]).verdict
     }
 
     #[test]
@@ -1034,7 +1185,7 @@ mod tests {
         make(dir.path());
         let tree = scan(dir.path()).unwrap();
         let id = find(&tree, suffix);
-        assess(&tree, id, Path::new(NOWHERE))
+        assess(&tree, id, Path::new(NOWHERE), &[])
     }
 
     #[test]
@@ -1128,5 +1279,31 @@ mod tests {
         );
         assert_eq!(a.verdict, Verdict::Caution);
         assert!(a.command.as_deref().unwrap().contains("rustup toolchain"));
+    }
+
+    #[test]
+    fn every_package_manager_has_metadata() {
+        for pm in ALL_PKG_MANAGERS {
+            assert!(!pm.binary().is_empty());
+            assert!(!pm.label().is_empty());
+            assert!(!pm.clean_cmd().is_empty());
+        }
+    }
+
+    #[test]
+    fn detection_returns_only_known_managers() {
+        // Environment-dependent, but must never panic and only yield known kinds.
+        for pm in detect_package_managers() {
+            assert!(ALL_PKG_MANAGERS.contains(&pm));
+        }
+    }
+
+    #[test]
+    fn system_cache_uses_detected_package_manager() {
+        // Simulate the system-cache branch's command/labels selection.
+        let pkgs = [PkgManager::Apt, PkgManager::Nix];
+        assert_eq!(pm_labels(&pkgs), "apt, nix");
+        assert_eq!(pkgs.first().copied(), Some(PkgManager::Apt));
+        assert!(PkgManager::Apt.clean_cmd().contains("apt clean"));
     }
 }

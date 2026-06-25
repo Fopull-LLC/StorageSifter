@@ -40,6 +40,8 @@ pub struct StorageSifterApp {
     settings: Settings,
     /// Action awaiting a key to rebind it (settings dialog).
     capturing: Option<Action>,
+    /// System package managers detected once at startup, for cleanup advice.
+    pkgs: Vec<assess::PkgManager>,
 }
 
 struct DiskInfo {
@@ -119,6 +121,7 @@ impl StorageSifterApp {
             status: None,
             settings: Settings::load(),
             capturing: None,
+            pkgs: assess::detect_package_managers(),
         }
     }
 
@@ -555,7 +558,7 @@ impl StorageSifterApp {
                 Some(MenuAction::Assess(id)) => {
                     // Computed once, here — the report is then cached in the
                     // dialog and never recomputed per frame.
-                    let report = assess::assess(tree, id, &self.home);
+                    let report = assess::assess(tree, id, &self.home, &self.pkgs);
                     self.dialog = Dialog::Assess { id, report };
                 }
                 Some(MenuAction::Properties(id)) => self.dialog = Dialog::Properties(id),

@@ -77,7 +77,18 @@ impl Category {
     pub fn of(tree: &Tree, id: NodeId) -> Category {
         let mut ancestor = Some(id);
         while let Some(node) = ancestor {
-            if tree.node(node).kind == NodeKind::Dir && is_junk_dir(tree.name(node)) {
+            // The scanner stores the full scanned path as the root node's name,
+            // so fall back to its basename here — otherwise scanning a cache dir
+            // directly (e.g. `/var/cache`) wouldn't read as junk. This only
+            // allocates for the root, never for the per-cell common case.
+            let junk = if node == tree.root {
+                tree.path(node)
+                    .file_name()
+                    .is_some_and(|n| is_junk_dir(&n.to_string_lossy()))
+            } else {
+                is_junk_dir(tree.name(node))
+            };
+            if tree.node(node).kind == NodeKind::Dir && junk {
                 return Category::Junk;
             }
             ancestor = tree.node(node).parent;

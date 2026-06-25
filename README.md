@@ -105,7 +105,10 @@ archives pink. One level of nested preview is drawn inside each folder.
   version managers, …) and, when a tool offers a cleaner way to reclaim the
   space than a plain delete, shows the **recommended command** to run (e.g.
   `npm cache clean --force`, `docker system prune -a`, `paccache -r`,
-  `journalctl --vacuum-time=2weeks`) with a one-click **Copy**. It reads only
+  `journalctl --vacuum-time=2weeks`) with a one-click **Copy**. For
+  system-managed caches it **detects your distro's package manager** (pacman,
+  apt, dnf, zypper, apk, xbps, portage, or nix) and gives the matching clean
+  command, so the advice is right wherever you run it. The analysis reads only
   the already-scanned, in-memory tree (no re-scan, no disk reads, no network)
   and is computed once, so it never slows the app down.
 - **Keyboard**: `Delete` trashes the selection, `Shift+Delete` deletes it
