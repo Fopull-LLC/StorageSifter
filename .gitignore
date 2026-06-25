@@ -2,6 +2,14 @@
 /dist
 **/*.rs.bk
 
+# Local makepkg build artifacts and AUR working clones under packaging/aur/.
+# The PKGBUILD and .SRCINFO are tracked; everything makepkg generates is not.
+packaging/aur/*/pkg/
+packaging/aur/*/src/
+packaging/aur/*/*.pkg.tar.*
+packaging/aur/*/*.tar.gz
+packaging/aur/*/aur-bin/
+
 # Local editor / agent tooling state
 /.claude/
 
