@@ -1,0 +1,27 @@
+# Maintainer: Ty Johnston (Fopull LLC) <CHANGE_ME@example.com>
+pkgname=storagesifter-bin
+_pkgname=storagesifter
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Fast, GPU-accelerated disk-usage treemap visualizer for Linux (prebuilt binary)"
+arch=('x86_64')
+url="https://github.com/fopull/StorageSifter"
+license=('MIT')
+depends=('gcc-libs' 'vulkan-icd-loader' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+options=('!strip' '!debug')
+_dir="storagesifter-v${pkgver}-x86_64-linux"
+source=("${_dir}.tar.gz::${url}/releases/download/v${pkgver}/${_dir}.tar.gz")
+# Run `updpkgsums` once the release artifact is published to fill this in.
+sha256sums=('SKIP')
+
+package() {
+    cd "$_dir"
+    install -Dm755 storagesifter "$pkgdir/usr/bin/storagesifter"
+    install -Dm644 com.fopull.StorageSifter.desktop \
+        "$pkgdir/usr/share/applications/com.fopull.StorageSifter.desktop"
+    install -Dm644 storagesifter.png \
+        "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.fopull.StorageSifter.png"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -71,20 +71,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "app"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "scanner",
- "serde",
- "serde_json",
- "sysinfo",
- "tempfile",
- "trash",
- "treemap",
-]
-
-[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2430,6 +2416,21 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "storagesifter"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "image",
+ "scanner",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tempfile",
+ "trash",
+ "treemap",
+]
 
 [[package]]
 name = "syn"

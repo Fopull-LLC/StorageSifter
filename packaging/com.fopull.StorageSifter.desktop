@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=StorageSifter
+GenericName=Disk Usage Analyzer
+Comment=See what's using your disk space as an interactive treemap
+Exec=storagesifter
+Icon=com.fopull.StorageSifter
+Terminal=false
+Categories=Utility;System;Filesystem;
+Keywords=disk;usage;space;treemap;storage;cleanup;analyzer;sunburst;
+StartupWMClass=com.fopull.StorageSifter

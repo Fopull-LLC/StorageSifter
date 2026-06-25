@@ -7,10 +7,56 @@ but native, GPU-accelerated, and built for a single Linux machine.
 
 A free and open-source project by **[Fopull LLC](https://fopull.com)**.
 
-> Status: early development. Phases 0–5 are in place — scanning engine,
-> squarified layout, interactive treemap (drill-down, breadcrumb, animated zoom),
-> a device picker, and file operations (multi-select, move to trash, permanent
-> delete) with safety guardrails.
+> **v0.1.0 — first public release.** A complete, daily-usable disk visualizer:
+> scanning engine, squarified treemap (drill-down, breadcrumb, animated zoom), a
+> device picker, file operations (multi-select, move to trash, permanent delete)
+> behind safety guardrails, and "Safe to delete?" cleanup reports.
+
+## Install
+
+StorageSifter is a single, self-contained binary for **x86-64 Linux**. It needs
+a Vulkan-capable GPU driver (standard on modern desktops) and a Wayland or X11
+session.
+
+### AppImage — any distro
+
+Download `StorageSifter-*-x86_64.AppImage` from the
+[latest release](https://github.com/fopull/StorageSifter/releases/latest), then:
+
+```sh
+chmod +x StorageSifter-*-x86_64.AppImage
+./StorageSifter-*-x86_64.AppImage
+```
+
+### Arch / CachyOS — AUR
+
+```sh
+yay -S storagesifter-bin     # prebuilt binary, fast
+# …or build from source:
+yay -S storagesifter
+```
+
+### Prebuilt binary — tarball
+
+Grab `storagesifter-*-x86_64-linux.tar.gz` from the
+[latest release](https://github.com/fopull/StorageSifter/releases/latest),
+then put the binary on your `PATH`:
+
+```sh
+tar xzf storagesifter-*-x86_64-linux.tar.gz
+install -Dm755 storagesifter-*/storagesifter ~/.local/bin/storagesifter
+```
+
+(The bundled `INSTALL.txt` covers optional menu-entry and icon integration.)
+
+### From source — cargo
+
+```sh
+cargo install --git https://github.com/fopull/StorageSifter --locked storagesifter
+```
+
+You can verify any download against the release's `SHA256SUMS.txt`:
+`sha256sum -c SHA256SUMS.txt`.
 
 ## Architecture
 
@@ -67,8 +113,8 @@ cargo test  -p scanner         # run the scanner's correctness tests
 ## Running the visualizer
 
 ```sh
-cargo run -p app             # pick a filesystem from the device list
-cargo run -p app -- [PATH]   # …or scan PATH directly
+cargo run -p storagesifter             # pick a filesystem from the device list
+cargo run -p storagesifter -- [PATH]   # …or scan PATH directly
 ```
 
 A dark, GPU-rendered window opens and a background scan fills in a squarified

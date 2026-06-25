@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.fopull.StorageSifter</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>StorageSifter</name>
+  <summary>See what's using your disk space as an interactive treemap</summary>
+  <developer id="com.fopull">
+    <name>Fopull LLC</name>
+  </developer>
+
+  <description>
+    <p>
+      StorageSifter is a fast, lightweight, GPU-accelerated disk-usage
+      visualizer for Linux. It maps a filesystem as a squarified treemap —
+      nested rectangles sized by what they actually consume on disk — so the
+      biggest space hogs are obvious at a glance.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Squarified treemap with smooth drill-down and animated zoom</li>
+      <li>Cells colored by what they are: caches/build output, media, code, documents, and more</li>
+      <li>Crosses Btrfs subvolumes and shows the boundaries clearly</li>
+      <li>Multi-select with move-to-trash and permanent delete, behind safety guardrails</li>
+      <li>"Safe to delete?" reports that identify a directory and suggest the proper cleanup command</li>
+      <li>Configurable keyboard shortcuts</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">com.fopull.StorageSifter.desktop</launchable>
+
+  <url type="homepage">https://fopull.com</url>
+  <url type="bugtracker">https://github.com/fopull/StorageSifter/issues</url>
+
+  <categories>
+    <category>Utility</category>
+    <category>System</category>
+  </categories>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-06-25">
+      <description>
+        <p>First public release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

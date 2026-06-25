@@ -1,5 +1,5 @@
 [package]
-name = "app"
+name = "storagesifter"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -17,6 +17,9 @@ path = "src/main.rs"
 # egui + the wgpu (Vulkan) backend. glow is disabled; wayland + x11 cover the
 # Linux session types. egui itself is re-exported as `eframe::egui`.
 eframe = { version = "=0.34.3", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
+# Decodes the embedded window icon (PNG → RGBA8). eframe already pulls `image`
+# transitively, so pinning to its resolved version adds no extra build cost.
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
 scanner = { path = "../scanner" }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.150"

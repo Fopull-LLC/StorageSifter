@@ -1,4 +1,5 @@
 /target
+/dist
 **/*.rs.bk
 
 # Local editor / agent tooling state
