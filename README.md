@@ -21,7 +21,7 @@ session.
 ### AppImage — any distro
 
 Download `StorageSifter-*-x86_64.AppImage` from the
-[latest release](https://github.com/fopull/StorageSifter/releases/latest), then:
+[latest release](https://github.com/Fopull-LLC/StorageSifter/releases/latest), then:
 
 ```sh
 chmod +x StorageSifter-*-x86_64.AppImage
@@ -39,7 +39,7 @@ yay -S storagesifter
 ### Prebuilt binary — tarball
 
 Grab `storagesifter-*-x86_64-linux.tar.gz` from the
-[latest release](https://github.com/fopull/StorageSifter/releases/latest),
+[latest release](https://github.com/Fopull-LLC/StorageSifter/releases/latest),
 then put the binary on your `PATH`:
 
 ```sh
@@ -52,7 +52,7 @@ install -Dm755 storagesifter-*/storagesifter ~/.local/bin/storagesifter
 ### From source — cargo
 
 ```sh
-cargo install --git https://github.com/fopull/StorageSifter --locked storagesifter
+cargo install --git https://github.com/Fopull-LLC/StorageSifter --locked storagesifter
 ```
 
 You can verify any download against the release's `SHA256SUMS.txt`:

@@ -29,4 +29,4 @@ First public release.
 - Distribution: AppImage, prebuilt binary tarball, AUR packages
   (`storagesifter`, `storagesifter-bin`), and `cargo install`.
 
-[0.1.0]: https://github.com/fopull/StorageSifter/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.1.0
