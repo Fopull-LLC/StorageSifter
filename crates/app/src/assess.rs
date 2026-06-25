@@ -734,7 +734,9 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Asse
     let path_lower = path.to_string_lossy().to_ascii_lowercase();
     if let Some(t) = recognize(tree, id, &path_lower) {
         if t.root {
-            points.push(Point::bad("System-managed — clearing it usually needs root"));
+            points.push(Point::bad(
+                "System-managed — clearing it usually needs root",
+            ));
         }
         if t.command.is_some() {
             points.push(Point::good("Has a dedicated cleanup command (below)"));
@@ -751,12 +753,19 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Asse
     // its own framing rather than being mislabeled "installed software".
     if category == Category::Junk {
         if class == Class::System {
-            points.push(Point::good("Cache / regenerated data — the space is reclaimable"));
-            points.push(Point::bad("System-managed — clearing it usually needs root"));
+            points.push(Point::good(
+                "Cache / regenerated data — the space is reclaimable",
+            ));
+            points.push(Point::bad(
+                "System-managed — clearing it usually needs root",
+            ));
             // Tailor the advice to whatever package manager is actually
             // installed, so the guidance is right on any distro.
             if let Some(pm) = pkgs.first().copied() {
-                points.push(Point::good(format!("Your package manager: {}", pm_labels(pkgs))));
+                points.push(Point::good(format!(
+                    "Your package manager: {}",
+                    pm_labels(pkgs)
+                )));
                 let mut report = finish(
                     Verdict::Likely,
                     "System cache",
@@ -774,7 +783,9 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Asse
             );
         }
         let (headline, detail) = junk_kind(&lower);
-        points.push(Point::good("Regenerated automatically when it's next needed"));
+        points.push(Point::good(
+            "Regenerated automatically when it's next needed",
+        ));
         return finish(Verdict::Safe, headline, detail, points);
     }
 
@@ -896,7 +907,9 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Asse
             let pct = (share * 100.0).round() as u32;
             match dominant {
                 Category::Junk => {
-                    points.push(Point::good(format!("{pct}% caches / build artifacts inside")));
+                    points.push(Point::good(format!(
+                        "{pct}% caches / build artifacts inside"
+                    )));
                     return finish(
                         Verdict::Likely,
                         "Mostly reclaimable",
@@ -1044,11 +1057,7 @@ fn dominant_category(tree: &Tree, id: NodeId) -> Option<(Category, f32)> {
     if grand == 0 {
         return None;
     }
-    let (idx, &best) = totals
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, &v)| v)
-        .unwrap();
+    let (idx, &best) = totals.iter().enumerate().max_by_key(|(_, &v)| v).unwrap();
     Some((cat_from_index(idx), best as f32 / grand as f32))
 }
 

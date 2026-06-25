@@ -117,7 +117,9 @@ impl StorageSifterApp {
             selection: HashSet::new(),
             menu: None,
             dialog: Dialog::None,
-            home: std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default(),
+            home: std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default(),
             status: None,
             settings: Settings::load(),
             capturing: None,
@@ -158,9 +160,9 @@ impl eframe::App for StorageSifterApp {
         if matches!(self.scan, Some(Scan::Done { .. }))
             && ui.ctx().input(|i| {
                 i.events.iter().any(|e| {
-                    matches!(e, egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. }
+                matches!(e, egui::Event::Key { key, pressed: true, repeat: false, modifiers, .. }
                         if self.settings.keys.rescan.matches(*key, *modifiers))
-                })
+            })
             })
         {
             self.open(self.path.clone());
@@ -236,8 +238,9 @@ impl StorageSifterApp {
                 ui.separator();
                 self.breadcrumb(ui);
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    match self.scan.as_ref() {
+                ui.with_layout(
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| match self.scan.as_ref() {
                         Some(Scan::Done { tree, elapsed }) => {
                             ui.label(
                                 egui::RichText::new(format!(
@@ -253,8 +256,8 @@ impl StorageSifterApp {
                             ui.label(egui::RichText::new("scanning…").color(theme::ACCENT));
                         }
                         _ => {}
-                    }
-                });
+                    },
+                );
             });
             ui.add_space(2.0);
         });
@@ -322,8 +325,15 @@ impl StorageSifterApp {
         egui::Panel::top("selection").show_inside(ui, |ui| {
             ui.add_space(3.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(format!("{count} selected")).color(theme::ACCENT).strong());
-                ui.label(egui::RichText::new(format!("·  {}", format_size(total))).color(theme::TEXT_DIM));
+                ui.label(
+                    egui::RichText::new(format!("{count} selected"))
+                        .color(theme::ACCENT)
+                        .strong(),
+                );
+                ui.label(
+                    egui::RichText::new(format!("·  {}", format_size(total)))
+                        .color(theme::TEXT_DIM),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Clear").clicked() {
                         action = Some(SelAction::Clear);
@@ -409,7 +419,11 @@ impl StorageSifterApp {
                 let mut back = false;
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.4);
-                    let color = if running { theme::TEXT_DIM } else { theme::DANGER };
+                    let color = if running {
+                        theme::TEXT_DIM
+                    } else {
+                        theme::DANGER
+                    };
                     ui.label(egui::RichText::new(msg).color(color).size(16.0));
                     ui.add_space(12.0);
                     let label = if running { "Cancel" } else { "Back to devices" };
@@ -563,14 +577,18 @@ impl StorageSifterApp {
                 }
                 Some(MenuAction::Properties(id)) => self.dialog = Dialog::Properties(id),
                 Some(MenuAction::Reveal(id)) => ops::reveal(&tree.path(id)),
-                Some(MenuAction::Trash(ids)) => match prepare_delete(tree, &self.home, ids, false) {
-                    Ok(dialog) => self.dialog = dialog,
-                    Err(msg) => self.status = Some(msg),
-                },
-                Some(MenuAction::Delete(ids)) => match prepare_delete(tree, &self.home, ids, true) {
-                    Ok(dialog) => self.dialog = dialog,
-                    Err(msg) => self.status = Some(msg),
-                },
+                Some(MenuAction::Trash(ids)) => {
+                    match prepare_delete(tree, &self.home, ids, false) {
+                        Ok(dialog) => self.dialog = dialog,
+                        Err(msg) => self.status = Some(msg),
+                    }
+                }
+                Some(MenuAction::Delete(ids)) => {
+                    match prepare_delete(tree, &self.home, ids, true) {
+                        Ok(dialog) => self.dialog = dialog,
+                        Err(msg) => self.status = Some(msg),
+                    }
+                }
                 None => {}
             }
 
@@ -638,7 +656,11 @@ impl StorageSifterApp {
                 .show(ui, |ui| {
                     prop_row(ui, "Path", path.display().to_string());
                     prop_row(ui, "On disk", format_size(node.size));
-                    prop_row(ui, "Category", theme::Category::of(tree, id).label().to_owned());
+                    prop_row(
+                        ui,
+                        "Category",
+                        theme::Category::of(tree, id).label().to_owned(),
+                    );
                     prop_row(ui, "Kind", kind_label(node.kind).to_owned());
                     if node.kind == NodeKind::Dir {
                         prop_row(ui, "Items", node.children.len().to_string());
@@ -649,7 +671,11 @@ impl StorageSifterApp {
                     if node.is_mountpoint() {
                         prop_row(ui, "Mount", "subvolume / mount point".to_owned());
                     }
-                    prop_row(ui, "Safety", class_label(classify(&path, &self.home)).to_owned());
+                    prop_row(
+                        ui,
+                        "Safety",
+                        class_label(classify(&path, &self.home)).to_owned(),
+                    );
                 });
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -676,7 +702,11 @@ impl StorageSifterApp {
         let node = tree.node(id);
         let path = tree.path(id);
         let meta = if node.kind == NodeKind::Dir {
-            format!("{}  ·  {} items", format_size(node.size), node.children.len())
+            format!(
+                "{}  ·  {} items",
+                format_size(node.size),
+                node.children.len()
+            )
         } else {
             format!("{}  ·  file", format_size(node.size))
         };
@@ -686,9 +716,7 @@ impl StorageSifterApp {
             ui.set_width(540.0);
 
             // Verdict badge + what-it-is headline.
-            ui.heading(
-                egui::RichText::new(report.verdict.label()).color(report.verdict.color()),
-            );
+            ui.heading(egui::RichText::new(report.verdict.label()).color(report.verdict.color()));
             ui.label(
                 egui::RichText::new(&report.headline)
                     .strong()
@@ -733,9 +761,11 @@ impl StorageSifterApp {
                         });
                     });
                 ui.label(
-                    egui::RichText::new("Run this in a terminal — StorageSifter won't run it for you.")
-                        .color(theme::TEXT_DIM)
-                        .small(),
+                    egui::RichText::new(
+                        "Run this in a terminal — StorageSifter won't run it for you.",
+                    )
+                    .color(theme::TEXT_DIM)
+                    .small(),
                 );
             }
 
@@ -800,24 +830,35 @@ impl StorageSifterApp {
             } else {
                 "Move to Trash"
             };
-            ui.heading(
-                egui::RichText::new(title)
-                    .color(if permanent { theme::DANGER } else { theme::TEXT }),
-            );
+            ui.heading(egui::RichText::new(title).color(if permanent {
+                theme::DANGER
+            } else {
+                theme::TEXT
+            }));
             ui.add_space(6.0);
-            ui.label(format!("{} item(s)  ·  {} total", ids.len(), format_size(total)));
+            ui.label(format!(
+                "{} item(s)  ·  {} total",
+                ids.len(),
+                format_size(total)
+            ));
             ui.add_space(4.0);
-            egui::ScrollArea::vertical().max_height(170.0).show(ui, |ui| {
-                for &id in ids.iter().take(15) {
-                    ui.monospace(tree.path(id).display().to_string());
-                }
-                if ids.len() > 15 {
-                    ui.label(format!("… and {} more", ids.len() - 15));
-                }
-            });
+            egui::ScrollArea::vertical()
+                .max_height(170.0)
+                .show(ui, |ui| {
+                    for &id in ids.iter().take(15) {
+                        ui.monospace(tree.path(id).display().to_string());
+                    }
+                    if ids.len() > 15 {
+                        ui.label(format!("… and {} more", ids.len() - 15));
+                    }
+                });
             ui.add_space(8.0);
             if permanent {
-                ui.label(egui::RichText::new("This cannot be undone.").color(theme::DANGER).strong());
+                ui.label(
+                    egui::RichText::new("This cannot be undone.")
+                        .color(theme::DANGER)
+                        .strong(),
+                );
             } else {
                 ui.label(
                     egui::RichText::new("Items can be restored from the trash.")
@@ -843,7 +884,11 @@ impl StorageSifterApp {
                     "Move to Trash"
                 };
                 let button = egui::Button::new(egui::RichText::new(go).color(egui::Color32::WHITE))
-                    .fill(if permanent { theme::DANGER } else { theme::Category::App.color() });
+                    .fill(if permanent {
+                        theme::DANGER
+                    } else {
+                        theme::Category::App.color()
+                    });
                 if ui.add(button).clicked() {
                     result = Confirm::Go;
                 }
@@ -931,7 +976,11 @@ impl StorageSifterApp {
             ui.heading("Settings");
             ui.add_space(8.0);
 
-            ui.label(egui::RichText::new("Keybindings").color(theme::ACCENT).strong());
+            ui.label(
+                egui::RichText::new("Keybindings")
+                    .color(theme::ACCENT)
+                    .strong(),
+            );
             ui.label(
                 egui::RichText::new("Click a binding, then press the keys.")
                     .small()
@@ -963,7 +1012,11 @@ impl StorageSifterApp {
                 });
             ui.add_space(12.0);
 
-            ui.label(egui::RichText::new("Behavior").color(theme::ACCENT).strong());
+            ui.label(
+                egui::RichText::new("Behavior")
+                    .color(theme::ACCENT)
+                    .strong(),
+            );
             ui.add_space(4.0);
             ui.checkbox(&mut self.settings.animations, "Animate zoom transitions");
             ui.horizontal(|ui| {
@@ -1133,7 +1186,6 @@ fn prop_row(ui: &mut egui::Ui, key: &str, value: String) {
     ui.end_row();
 }
 
-
 fn kind_label(kind: NodeKind) -> &'static str {
     match kind {
         NodeKind::Dir => "Folder",
@@ -1188,7 +1240,12 @@ fn list_disks() -> Vec<DiskInfo> {
 }
 
 /// The child of `target` on the path up from `from`, plus its screen rect.
-fn zoom_out_pivot(tree: &Tree, from: NodeId, target: NodeId, area: ERect) -> Option<(NodeId, ERect)> {
+fn zoom_out_pivot(
+    tree: &Tree,
+    from: NodeId,
+    target: NodeId,
+    area: ERect,
+) -> Option<(NodeId, ERect)> {
     let mut node = from;
     while let Some(parent) = tree.node(node).parent {
         if parent == target {

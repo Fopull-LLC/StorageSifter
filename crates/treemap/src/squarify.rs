@@ -203,7 +203,10 @@ mod tests {
             assert!(r.y + r.h <= bounds.h + 1e-6, "cell overflows height: {r:?}");
             covered += r.area();
         }
-        assert!(approx(covered, total_area), "tiling gap: {covered} vs {total_area}");
+        assert!(
+            approx(covered, total_area),
+            "tiling gap: {covered} vs {total_area}"
+        );
 
         // The point of "squarified": aspect ratios stay low. Slice-and-dice on
         // this example would produce far more elongated cells.

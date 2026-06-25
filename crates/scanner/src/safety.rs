@@ -53,7 +53,9 @@ pub fn classify(path: &Path, home: &Path) -> Class {
 pub fn classify_with_env(path: &Path) -> Class {
     // An unset `$HOME` yields an empty path, which `classify` treats as matching
     // nothing — so we never fall back to `/` (which would mark everything Normal).
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     classify(path, &home)
 }
 
@@ -78,7 +80,10 @@ mod tests {
     fn empty_home_is_fail_safe() {
         // $HOME unset must not classify everything as Normal.
         let nohome = Path::new("");
-        assert_eq!(classify(Path::new("/home/me/x"), nohome), Class::OutsideHome);
+        assert_eq!(
+            classify(Path::new("/home/me/x"), nohome),
+            Class::OutsideHome
+        );
         assert_eq!(classify(Path::new("/usr/lib"), nohome), Class::System);
         assert_eq!(classify(Path::new("/"), nohome), Class::Critical);
     }

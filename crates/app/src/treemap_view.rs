@@ -16,7 +16,9 @@
 
 use std::collections::HashSet;
 
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, StrokeKind, Vec2};
+use eframe::egui::{
+    self, Align2, Color32, FontId, Pos2, Rect as ERect, Sense, Stroke, StrokeKind, Vec2,
+};
 use scanner::{NodeId, NodeKind, Tree};
 use treemap::{squarify, Rect};
 
@@ -83,16 +85,29 @@ pub fn show(
     // --- Animating: cross-fade the parent (zooming) and child (growing) views.
     if let Some(a) = anim {
         let (p_src, p_alpha, c_dst, c_alpha) = if a.drilling_in {
-            (lerp_rect(area, a.pivot, a.e), 1.0 - a.e, lerp_rect(a.pivot, area, a.e), a.e)
+            (
+                lerp_rect(area, a.pivot, a.e),
+                1.0 - a.e,
+                lerp_rect(a.pivot, area, a.e),
+                a.e,
+            )
         } else {
-            (lerp_rect(a.pivot, area, a.e), a.e, lerp_rect(area, a.pivot, a.e), 1.0 - a.e)
+            (
+                lerp_rect(a.pivot, area, a.e),
+                a.e,
+                lerp_rect(area, a.pivot, a.e),
+                1.0 - a.e,
+            )
         };
         let mut sink = None;
         let parent = Paint {
             painter: &painter,
             tree,
             area,
-            xform: Xform { src: p_src, dst: area },
+            xform: Xform {
+                src: p_src,
+                dst: area,
+            },
             alpha: p_alpha,
             hover_pos: None,
             char_w,
@@ -101,7 +116,10 @@ pub fn show(
         };
         draw_node_children(&parent, a.parent, nesting, &mut sink);
         let child = Paint {
-            xform: Xform { src: area, dst: c_dst },
+            xform: Xform {
+                src: area,
+                dst: c_dst,
+            },
             alpha: c_alpha,
             ..parent
         };
@@ -170,7 +188,11 @@ pub fn show(
     } else {
         None
     };
-    let secondary = if response.secondary_clicked() { hovered } else { None };
+    let secondary = if response.secondary_clicked() {
+        hovered
+    } else {
+        None
+    };
 
     Interaction {
         hovered,
@@ -229,7 +251,8 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
 
     let node = ctx.tree.node(id);
     let color = Category::of(ctx.tree, id).color();
-    ctx.painter.rect_filled(drawn, 0, color.gamma_multiply(ctx.alpha));
+    ctx.painter
+        .rect_filled(drawn, 0, color.gamma_multiply(ctx.alpha));
     ctx.painter.rect_stroke(
         drawn,
         0,
@@ -274,7 +297,13 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
 
     if can_nest {
         let header = ERect::from_min_max(rect.min, Pos2::new(rect.max.x, rect.min.y + HEADER_H));
-        draw_label(ctx, ctx.xform.apply(header), ctx.tree.name(id), node.size, label_color);
+        draw_label(
+            ctx,
+            ctx.xform.apply(header),
+            ctx.tree.name(id),
+            node.size,
+            label_color,
+        );
 
         let inner = ERect::from_min_max(
             Pos2::new(rect.min.x + PAD, rect.min.y + HEADER_H),
@@ -331,7 +360,12 @@ fn sorted_children(tree: &Tree, id: NodeId) -> Vec<NodeId> {
 }
 
 fn to_layout(r: ERect) -> Rect {
-    Rect::new(r.min.x as f64, r.min.y as f64, r.width() as f64, r.height() as f64)
+    Rect::new(
+        r.min.x as f64,
+        r.min.y as f64,
+        r.width() as f64,
+        r.height() as f64,
+    )
 }
 
 fn to_screen(r: Rect) -> ERect {
@@ -351,7 +385,10 @@ struct Xform {
 
 impl Xform {
     fn identity(area: ERect) -> Self {
-        Xform { src: area, dst: area }
+        Xform {
+            src: area,
+            dst: area,
+        }
     }
 
     fn apply(&self, r: ERect) -> ERect {

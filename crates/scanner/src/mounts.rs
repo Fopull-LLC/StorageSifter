@@ -104,7 +104,10 @@ mod tests {
 
     #[test]
     fn unescape_octal_and_utf8_safe() {
-        assert_eq!(unescape("/mnt/My\\040Drive"), PathBuf::from("/mnt/My Drive"));
+        assert_eq!(
+            unescape("/mnt/My\\040Drive"),
+            PathBuf::from("/mnt/My Drive")
+        );
         assert_eq!(unescape("/plain/path"), PathBuf::from("/plain/path"));
         // A backslash adjacent to multibyte UTF-8 must not panic.
         let _ = unescape("/mnt/\\é");
