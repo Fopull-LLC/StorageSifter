@@ -1,0 +1,23 @@
+pkgbase = storagesifter-bin
+	pkgdesc = Fast, GPU-accelerated disk-usage treemap visualizer for Linux (prebuilt binary)
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/Fopull-LLC/StorageSifter
+	arch = x86_64
+	license = MIT
+	depends = gcc-libs
+	depends = vulkan-icd-loader
+	depends = libxkbcommon
+	depends = wayland
+	depends = libx11
+	depends = libxcursor
+	depends = libxi
+	depends = libxrandr
+	provides = storagesifter
+	conflicts = storagesifter
+	options = !strip
+	options = !debug
+	source = storagesifter-v0.1.0-x86_64-linux.tar.gz::https://github.com/Fopull-LLC/StorageSifter/releases/download/v0.1.0/storagesifter-v0.1.0-x86_64-linux.tar.gz
+	sha256sums = 6f36e01e19c128b65d2624f254d33893812ac6f8166ca931ee1ba225571f0877
+
+pkgname = storagesifter-bin

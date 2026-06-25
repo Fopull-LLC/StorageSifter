@@ -9,8 +9,8 @@ license=('MIT')
 depends=('gcc-libs' 'vulkan-icd-loader' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
-# Run `updpkgsums` to fill this in (the tag tarball is stable once pushed).
-sha256sums=('SKIP')
+# Checksum of the v0.1.0 source tarball; re-run `updpkgsums` on each version bump.
+sha256sums=('fa0c707551f0d782239702d40f780108745bacb6ed9bbefb69d36bc0342bf2db')
 
 prepare() {
     cd "StorageSifter-${pkgver}"

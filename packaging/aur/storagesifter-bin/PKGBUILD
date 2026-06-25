@@ -13,8 +13,8 @@ conflicts=("$_pkgname")
 options=('!strip' '!debug')
 _dir="storagesifter-v${pkgver}-x86_64-linux"
 source=("${_dir}.tar.gz::${url}/releases/download/v${pkgver}/${_dir}.tar.gz")
-# Run `updpkgsums` once the release artifact is published to fill this in.
-sha256sums=('SKIP')
+# Checksum of the v0.1.0 release tarball; re-run `updpkgsums` on each version bump.
+sha256sums=('6f36e01e19c128b65d2624f254d33893812ac6f8166ca931ee1ba225571f0877')
 
 package() {
     cd "$_dir"

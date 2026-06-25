@@ -7,6 +7,8 @@ but native, GPU-accelerated, and built for a single Linux machine.
 
 A free and open-source project by **[Fopull LLC](https://fopull.com)**.
 
+![StorageSifter showing a treemap of the root filesystem with a "Safe to delete?" report open on /var/cache, recommending the pacman cleanup command](assets/Screenshots/ss2.png)
+
 > **v0.1.0 — first public release.** A complete, daily-usable disk visualizer:
 > scanning engine, squarified treemap (drill-down, breadcrumb, animated zoom), a
 > device picker, file operations (multi-select, move to trash, permanent delete)
@@ -29,6 +31,10 @@ chmod +x StorageSifter-*-x86_64.AppImage
 ```
 
 ### Arch / CachyOS — AUR
+
+> **Coming soon.** The AUR packages are prepared (see [`packaging/aur/`](packaging/aur))
+> and will be published shortly. For now, use the AppImage above. Once they're
+> live, install with:
 
 ```sh
 yay -S storagesifter-bin     # prebuilt binary, fast
@@ -57,6 +63,18 @@ cargo install --git https://github.com/Fopull-LLC/StorageSifter --locked storage
 
 You can verify any download against the release's `SHA256SUMS.txt`:
 `sha256sum -c SHA256SUMS.txt`.
+
+## Requirements
+
+- **x86-64 Linux** (no ARM builds yet).
+- A **Vulkan-capable GPU and driver.** StorageSifter renders on wgpu/Vulkan with
+  no software-rendering fallback, so a machine without working Vulkan (some VMs,
+  very old GPUs) may not launch.
+- A **Wayland or X11** session.
+- For the **AppImage**, **FUSE 2** (`libfuse2`) — or run it with
+  `./StorageSifter-*.AppImage --appimage-extract-and-run`.
+- The prebuilt binaries target **glibc 2.35+** (built on Ubuntu 22.04); current
+  distributions are fine.
 
 ## Architecture
 
@@ -123,6 +141,8 @@ and build artifacts (`target/`, `node_modules/`, `.cache/`, `__pycache__`, …)
 and everything inside them glow **amber** so reclaimable space stands out at a
 glance, with media green, applications cyan, code blue, documents yellow, and
 archives pink. One level of nested preview is drawn inside each folder.
+
+![A treemap of a home directory, colored by category, with a "Probably keep — Personal media" report open on the Videos folder](assets/Screenshots/ss1.png)
 
 - **Click** a folder to drill into it — the view zooms in, growing out of the
   cell you clicked.
@@ -195,6 +215,13 @@ locate the discrepancy.
 
 Built for one machine (CachyOS / Linux). It uses Linux-specific APIs directly and
 does not carry cross-platform abstractions.
+
+## Reporting bugs & feedback
+
+Hit a problem or have an idea? Please
+[open an issue](https://github.com/Fopull-LLC/StorageSifter/issues). It helps to
+include your **distro**, **GPU and driver**, and **session type** (Wayland or
+X11) — plus any terminal output if it failed to launch.
 
 ## About
 

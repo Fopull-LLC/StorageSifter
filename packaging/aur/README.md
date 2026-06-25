@@ -12,25 +12,25 @@ Publish whichever you want (you can publish both). You'll need an
 
 ## One-time per package
 
+For **v0.1.0 the `sha256sums` and `.SRCINFO` are already filled in and committed**
+(generated against the live release), so the only thing you *must* do before
+pushing is set the real `Maintainer:` email. The full flow:
+
 ```sh
-# 1. Cut the GitHub release first (push a tag; CI builds the artifacts).
-#    The -bin package downloads from that release, so it must exist.
+# 0. Set your Maintainer email at the top of the PKGBUILD (replaces CHANGE_ME).
 
-# 2. Fill in the real checksum (replaces the SKIP placeholder):
-cd packaging/aur/storagesifter-bin      # or .../storagesifter
-updpkgsums
+# 1. (Optional) test the build locally:
+cd packaging/aur/storagesifter-bin       # or .../storagesifter
+makepkg -si                              # builds + installs to verify
 
-# 3. Sanity-check the build in a clean chroot if you can:
-makepkg -si                              # builds + installs locally to test
-
-# 4. Generate the AUR metadata file:
-makepkg --printsrcinfo > .SRCINFO
-
-# 5. Push to the AUR (the AUR repo name is the pkgname):
+# 2. Push to the AUR (the AUR repo name is the pkgname):
 git clone ssh://aur@aur.archlinux.org/storagesifter-bin.git aur-bin
 cp PKGBUILD .SRCINFO aur-bin/
 cd aur-bin && git add PKGBUILD .SRCINFO && git commit -m "Initial import: 0.1.0" && git push
 ```
+
+(If you edit the PKGBUILD after this, re-run `updpkgsums` and
+`makepkg --printsrcinfo > .SRCINFO` so they stay in sync.)
 
 ## On each new release
 
