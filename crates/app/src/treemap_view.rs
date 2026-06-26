@@ -74,12 +74,14 @@ pub fn show(
     selection: &HashSet<NodeId>,
     nesting: u32,
 ) -> Interaction {
+    // Snapshot the palette once per frame; cells read fields off this copy.
+    let pal = theme::palette();
     let size = ui.available_size();
     let (area, response) = ui.allocate_exact_size(size, Sense::click());
     let painter = ui.painter_at(area);
-    painter.rect_filled(area, 0, theme::BG);
+    painter.rect_filled(area, 0, pal.bg);
 
-    let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), theme::TEXT);
+    let probe = painter.layout_no_wrap("0".to_owned(), FontId::monospace(LABEL_FONT), pal.text);
     let (char_w, line_h) = (probe.size().x, probe.size().y);
 
     // --- Animating: cross-fade the parent (zooming) and child (growing) views.
@@ -113,6 +115,7 @@ pub fn show(
             char_w,
             line_h,
             selection,
+            pal,
         };
         draw_node_children(&parent, a.parent, nesting, &mut sink);
         let child = Paint {
@@ -142,7 +145,7 @@ pub fn show(
             Align2::CENTER_CENTER,
             "(empty folder)",
             FontId::proportional(14.0),
-            theme::TEXT_DIM,
+            pal.text_dim,
         );
         return Interaction {
             hovered: None,
@@ -164,6 +167,7 @@ pub fn show(
         char_w,
         line_h,
         selection,
+        pal,
     };
     let weights: Vec<u64> = children.iter().map(|&id| tree.node(id).size).collect();
     let rects = squarify(&weights, to_layout(area));
@@ -225,6 +229,7 @@ struct Paint<'a> {
     char_w: f32,
     line_h: f32,
     selection: &'a HashSet<NodeId>,
+    pal: theme::Palette,
 }
 
 fn draw_node_children(ctx: &Paint, node: NodeId, nesting: u32, hovered: &mut Option<Hit>) {
@@ -250,30 +255,30 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     }
 
     let node = ctx.tree.node(id);
-    let color = Category::of(ctx.tree, id).color();
+    let color = Category::of(ctx.tree, id).color(&ctx.pal);
     ctx.painter
         .rect_filled(drawn, 0, color.gamma_multiply(ctx.alpha));
     ctx.painter.rect_stroke(
         drawn,
         0,
-        Stroke::new(1.0, theme::BORDER.gamma_multiply(ctx.alpha)),
+        Stroke::new(1.0, ctx.pal.border.gamma_multiply(ctx.alpha)),
         StrokeKind::Inside,
     );
     if node.is_mountpoint() {
         ctx.painter.rect_stroke(
             drawn,
             0,
-            Stroke::new(2.5, theme::MOUNT.gamma_multiply(ctx.alpha)),
+            Stroke::new(2.5, ctx.pal.mount.gamma_multiply(ctx.alpha)),
             StrokeKind::Inside,
         );
     }
     if ctx.selection.contains(&id) {
         ctx.painter
-            .rect_filled(drawn, 0, theme::ACCENT.gamma_multiply(0.28 * ctx.alpha));
+            .rect_filled(drawn, 0, ctx.pal.accent.gamma_multiply(0.28 * ctx.alpha));
         ctx.painter.rect_stroke(
             drawn,
             0,
-            Stroke::new(2.0, theme::ACCENT.gamma_multiply(ctx.alpha)),
+            Stroke::new(2.0, ctx.pal.accent.gamma_multiply(ctx.alpha)),
             StrokeKind::Inside,
         );
     }
@@ -285,7 +290,7 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     }
 
     let label_color = if node.is_mountpoint() {
-        theme::MOUNT
+        ctx.pal.mount
     } else {
         theme::contrast_text(color)
     };

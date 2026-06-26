@@ -43,8 +43,11 @@ fn main() -> eframe::Result<()> {
         "StorageSifter",
         options,
         Box::new(move |cc| {
+            // Construct first: the app loads settings and installs the saved
+            // palette, so `apply` below themes the very first frame correctly.
+            let app = app::StorageSifterApp::new(path);
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(app::StorageSifterApp::new(path)))
+            Ok(Box::new(app))
         }),
     )
 }

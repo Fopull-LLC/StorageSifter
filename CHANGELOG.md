@@ -4,6 +4,20 @@ All notable changes to StorageSifter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Customizable color palette** in Settings: pick a preset (Cool Dark, High
+  Contrast, Light) or fine-tune any of the 16 interface/category colors. The
+  light preset also switches the chrome to a light theme.
+- **Text / UI size** control for accessibility — scales the whole interface.
+- **Animation speed** control, and the ability to raise **folder preview depth**
+  beyond 2 (with a performance caution).
+
+All of these persist to `settings.json` and apply live. The treemap snapshots
+the active palette once per frame, so customization adds no per-cell cost.
+
 ## [0.1.0] — 2026-06-25
 
 First public release.

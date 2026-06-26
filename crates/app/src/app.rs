@@ -15,9 +15,6 @@ use crate::settings::{Action, Keybind, Settings};
 use crate::theme::{self, format_size};
 use crate::treemap_view;
 
-/// Zoom duration in seconds.
-const ANIM_SECS: f64 = 0.22;
-
 pub struct StorageSifterApp {
     disks: Vec<DiskInfo>,
     scan: Option<Scan>,
@@ -106,6 +103,8 @@ impl StorageSifterApp {
             Some(p) => (Some(Scan::start(&p)), p),
             None => (None, PathBuf::new()),
         };
+        let settings = Settings::load();
+        theme::set_palette(settings.palette);
         Self {
             disks: list_disks(),
             scan,
@@ -121,7 +120,7 @@ impl StorageSifterApp {
                 .map(PathBuf::from)
                 .unwrap_or_default(),
             status: None,
-            settings: Settings::load(),
+            settings,
             capturing: None,
             pkgs: assess::detect_package_managers(),
         }
@@ -144,6 +143,12 @@ impl StorageSifterApp {
 
 impl eframe::App for StorageSifterApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Accessibility: scale the whole UI. Only set it when it actually
+        // changes, so we don't force a relayout every frame.
+        if (ui.ctx().zoom_factor() - self.settings.ui_scale).abs() > 0.001 {
+            ui.ctx().set_zoom_factor(self.settings.ui_scale);
+        }
+
         if self.scan.is_none() {
             self.device_picker(ui);
             return;
@@ -183,8 +188,10 @@ impl StorageSifterApp {
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.add_space(24.0);
             ui.vertical_centered(|ui| {
-                ui.heading(egui::RichText::new("StorageSifter").color(theme::TEXT));
-                ui.label(egui::RichText::new("Choose a filesystem to scan").color(theme::TEXT_DIM));
+                ui.heading(egui::RichText::new("StorageSifter").color(theme::text()));
+                ui.label(
+                    egui::RichText::new("Choose a filesystem to scan").color(theme::text_dim()),
+                );
                 ui.add_space(8.0);
                 if ui.button("⟳  Refresh").clicked() {
                     refresh = true;
@@ -204,7 +211,9 @@ impl StorageSifterApp {
             ui.add_space(10.0);
             ui.vertical_centered(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("A Fopull LLC project  ·").color(theme::TEXT_DIM));
+                    ui.label(
+                        egui::RichText::new("A Fopull LLC project  ·").color(theme::text_dim()),
+                    );
                     ui.hyperlink_to("fopull.com", "https://fopull.com");
                 });
             });
@@ -249,11 +258,11 @@ impl StorageSifterApp {
                                     tree.len(),
                                     elapsed.as_secs_f64()
                                 ))
-                                .color(theme::TEXT_DIM),
+                                .color(theme::text_dim()),
                             );
                         }
                         Some(Scan::Running { .. }) => {
-                            ui.label(egui::RichText::new("scanning…").color(theme::ACCENT));
+                            ui.label(egui::RichText::new("scanning…").color(theme::accent()));
                         }
                         _ => {}
                     },
@@ -280,11 +289,11 @@ impl StorageSifterApp {
         let mut jump = None;
         for (i, &id) in ids.iter().enumerate() {
             if i > 0 {
-                ui.label(egui::RichText::new("›").color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new("›").color(theme::text_dim()));
             }
             let label = segment_label(tree, id);
             if i == ids.len() - 1 {
-                ui.label(egui::RichText::new(label).color(theme::TEXT).strong());
+                ui.label(egui::RichText::new(label).color(theme::text()).strong());
             } else if ui.link(label).clicked() {
                 jump = Some(id);
             }
@@ -327,12 +336,12 @@ impl StorageSifterApp {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new(format!("{count} selected"))
-                        .color(theme::ACCENT)
+                        .color(theme::accent())
                         .strong(),
                 );
                 ui.label(
                     egui::RichText::new(format!("·  {}", format_size(total)))
-                        .color(theme::TEXT_DIM),
+                        .color(theme::text_dim()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Clear").clicked() {
@@ -341,7 +350,7 @@ impl StorageSifterApp {
                     let del = egui::Button::new(
                         egui::RichText::new("Delete…").color(egui::Color32::WHITE),
                     )
-                    .fill(theme::DANGER);
+                    .fill(theme::danger());
                     if ui.add(del).clicked() {
                         action = Some(SelAction::Delete);
                     }
@@ -376,18 +385,21 @@ impl StorageSifterApp {
                     ui.monospace(tree.path(id).display().to_string());
                     ui.label(
                         egui::RichText::new(format!("·  {}", format_size(node.size)))
-                            .color(theme::TEXT_DIM),
+                            .color(theme::text_dim()),
                     );
                     let cat = theme::Category::of(tree, id);
-                    ui.label(egui::RichText::new(format!("·  {}", cat.label())).color(cat.color()));
+                    ui.label(
+                        egui::RichText::new(format!("·  {}", cat.label()))
+                            .color(cat.color(&theme::palette())),
+                    );
                     if node.is_mountpoint() {
-                        ui.label(egui::RichText::new("·  mount point").color(theme::MOUNT));
+                        ui.label(egui::RichText::new("·  mount point").color(theme::mount()));
                     }
                     if node.is_hardlinked() {
-                        ui.label(egui::RichText::new("·  hardlinked").color(theme::ACCENT));
+                        ui.label(egui::RichText::new("·  hardlinked").color(theme::accent()));
                     }
                     if let Some(warn) = safety_note(classify(&tree.path(id), &self.home)) {
-                        ui.label(egui::RichText::new(warn).color(theme::DANGER));
+                        ui.label(egui::RichText::new(warn).color(theme::danger()));
                     }
                 }
                 (Some(Scan::Done { .. }), None) => {
@@ -395,7 +407,7 @@ impl StorageSifterApp {
                         "click to drill · Ctrl/Shift-click to select · right-click for actions"
                             .to_owned()
                     });
-                    ui.label(egui::RichText::new(hint).color(theme::TEXT_DIM));
+                    ui.label(egui::RichText::new(hint).color(theme::text_dim()));
                 }
                 _ => {
                     ui.label("");
@@ -420,9 +432,9 @@ impl StorageSifterApp {
                 ui.vertical_centered(|ui| {
                     ui.add_space(ui.available_height() * 0.4);
                     let color = if running {
-                        theme::TEXT_DIM
+                        theme::text_dim()
                     } else {
-                        theme::DANGER
+                        theme::danger()
                     };
                     ui.label(egui::RichText::new(msg).color(color).size(16.0));
                     ui.add_space(12.0);
@@ -505,7 +517,7 @@ impl StorageSifterApp {
 
             let anim = if let Some(a) = &mut self.anim {
                 let start = *a.start.get_or_insert(now);
-                let t = (now - start) / ANIM_SECS;
+                let t = (now - start) / self.settings.anim_secs.max(0.01) as f64;
                 if t >= 1.0 {
                     None
                 } else {
@@ -720,11 +732,11 @@ impl StorageSifterApp {
             ui.label(
                 egui::RichText::new(&report.headline)
                     .strong()
-                    .color(theme::TEXT),
+                    .color(theme::text()),
             );
             ui.add_space(6.0);
             ui.monospace(path.display().to_string());
-            ui.label(egui::RichText::new(meta).color(theme::TEXT_DIM));
+            ui.label(egui::RichText::new(meta).color(theme::text_dim()));
 
             ui.add_space(10.0);
             ui.label(&report.detail);
@@ -734,19 +746,19 @@ impl StorageSifterApp {
                 ui.add_space(10.0);
                 ui.label(
                     egui::RichText::new("Recommended way to clear it")
-                        .color(theme::MOUNT)
+                        .color(theme::mount())
                         .strong(),
                 );
                 ui.add_space(2.0);
                 egui::Frame::new()
-                    .fill(theme::BG)
+                    .fill(theme::bg())
                     .inner_margin(egui::Margin::symmetric(8, 6))
                     .corner_radius(4)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.add(
                                 egui::Label::new(
-                                    egui::RichText::new(cmd).monospace().color(theme::TEXT),
+                                    egui::RichText::new(cmd).monospace().color(theme::text()),
                                 )
                                 .wrap(),
                             );
@@ -764,7 +776,7 @@ impl StorageSifterApp {
                     egui::RichText::new(
                         "Run this in a terminal — StorageSifter won't run it for you.",
                     )
-                    .color(theme::TEXT_DIM)
+                    .color(theme::text_dim())
                     .small(),
                 );
             }
@@ -780,7 +792,7 @@ impl StorageSifterApp {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.label(egui::RichText::new(mark).color(color));
-                        ui.label(egui::RichText::new(&p.text).color(theme::TEXT));
+                        ui.label(egui::RichText::new(&p.text).color(theme::text()));
                     });
                 }
             }
@@ -795,7 +807,7 @@ impl StorageSifterApp {
                 let del = egui::Button::new(
                     egui::RichText::new("Delete permanently…").color(egui::Color32::WHITE),
                 )
-                .fill(theme::DANGER);
+                .fill(theme::danger());
                 if ui.add(del).clicked() {
                     outcome = AssessOutcome::Delete;
                 }
@@ -831,9 +843,9 @@ impl StorageSifterApp {
                 "Move to Trash"
             };
             ui.heading(egui::RichText::new(title).color(if permanent {
-                theme::DANGER
+                theme::danger()
             } else {
-                theme::TEXT
+                theme::text()
             }));
             ui.add_space(6.0);
             ui.label(format!(
@@ -856,13 +868,13 @@ impl StorageSifterApp {
             if permanent {
                 ui.label(
                     egui::RichText::new("This cannot be undone.")
-                        .color(theme::DANGER)
+                        .color(theme::danger())
                         .strong(),
                 );
             } else {
                 ui.label(
                     egui::RichText::new("Items can be restored from the trash.")
-                        .color(theme::TEXT_DIM),
+                        .color(theme::text_dim()),
                 );
             }
             if outside > 0 {
@@ -870,7 +882,7 @@ impl StorageSifterApp {
                     egui::RichText::new(format!(
                         "⚠  {outside} item(s) are outside your home directory."
                     ))
-                    .color(theme::DANGER),
+                    .color(theme::danger()),
                 );
             }
             ui.add_space(10.0);
@@ -885,9 +897,9 @@ impl StorageSifterApp {
                 };
                 let button = egui::Button::new(egui::RichText::new(go).color(egui::Color32::WHITE))
                     .fill(if permanent {
-                        theme::DANGER
+                        theme::danger()
                     } else {
-                        theme::Category::App.color()
+                        theme::Category::App.color(&theme::palette())
                     });
                 if ui.add(button).clicked() {
                     result = Confirm::Go;
@@ -971,64 +983,165 @@ impl StorageSifterApp {
         }
 
         let mut keep = true;
+        // Set true by any color/preset change so we re-install the palette once,
+        // after the dialog is built.
+        let mut theme_dirty = false;
         let response = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
-            ui.set_width(470.0);
+            ui.set_width(500.0);
             ui.heading("Settings");
             ui.add_space(8.0);
 
-            ui.label(
-                egui::RichText::new("Keybindings")
-                    .color(theme::ACCENT)
-                    .strong(),
-            );
-            ui.label(
-                egui::RichText::new("Click a binding, then press the keys.")
-                    .small()
-                    .color(theme::TEXT_DIM),
-            );
-            ui.add_space(4.0);
-            egui::Grid::new("binds")
-                .num_columns(2)
-                .spacing([18.0, 6.0])
+            egui::ScrollArea::vertical()
+                .max_height(600.0)
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    for action in Action::ALL {
-                        ui.label(action.label());
-                        let listening = self.capturing == Some(action);
-                        let text = if listening {
-                            "press keys…".to_owned()
-                        } else {
-                            self.settings.keys.get(action).label()
-                        };
-                        let mut button = egui::Button::new(egui::RichText::new(text).monospace())
-                            .min_size(egui::vec2(160.0, 0.0));
-                        if listening {
-                            button = button.fill(theme::ACCENT.gamma_multiply(0.4));
-                        }
-                        if ui.add(button).clicked() {
-                            self.capturing = if listening { None } else { Some(action) };
-                        }
-                        ui.end_row();
+                    // ---- Keybindings ----
+                    section_label(ui, "Keybindings");
+                    ui.label(
+                        egui::RichText::new("Click a binding, then press the keys.")
+                            .small()
+                            .color(theme::text_dim()),
+                    );
+                    ui.add_space(4.0);
+                    egui::Grid::new("binds")
+                        .num_columns(2)
+                        .spacing([18.0, 6.0])
+                        .show(ui, |ui| {
+                            for action in Action::ALL {
+                                ui.label(action.label());
+                                let listening = self.capturing == Some(action);
+                                let text = if listening {
+                                    "press keys…".to_owned()
+                                } else {
+                                    self.settings.keys.get(action).label()
+                                };
+                                let mut button =
+                                    egui::Button::new(egui::RichText::new(text).monospace())
+                                        .min_size(egui::vec2(160.0, 0.0));
+                                if listening {
+                                    button = button.fill(theme::accent().gamma_multiply(0.4));
+                                }
+                                if ui.add(button).clicked() {
+                                    self.capturing = if listening { None } else { Some(action) };
+                                }
+                                ui.end_row();
+                            }
+                        });
+                    ui.add_space(12.0);
+
+                    // ---- Behavior ----
+                    section_label(ui, "Behavior");
+                    ui.checkbox(&mut self.settings.animations, "Animate zoom transitions");
+                    ui.add_enabled_ui(self.settings.animations, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Animation speed");
+                            ui.add(
+                                egui::Slider::new(
+                                    &mut self.settings.anim_secs,
+                                    crate::settings::ANIM_SECS_RANGE,
+                                )
+                                .suffix(" s"),
+                            );
+                            ui.label(
+                                egui::RichText::new("lower = snappier")
+                                    .small()
+                                    .color(theme::text_dim()),
+                            );
+                        });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Folder preview depth");
+                        ui.add(egui::Slider::new(
+                            &mut self.settings.nesting_depth,
+                            0..=crate::settings::MAX_NESTING_DEPTH,
+                        ));
+                    });
+                    if self.settings.nesting_depth > crate::settings::NESTING_ADVISED_MAX {
+                        ui.label(
+                            egui::RichText::new(
+                                "⚠  Deep previews draw many more cells — may slow rendering on very large trees.",
+                            )
+                            .small()
+                            .color(theme::danger()),
+                        );
                     }
+                    ui.add_space(12.0);
+
+                    // ---- Accessibility ----
+                    section_label(ui, "Accessibility");
+                    ui.horizontal(|ui| {
+                        ui.label("Text / UI size");
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.settings.ui_scale,
+                                crate::settings::UI_SCALE_RANGE,
+                            )
+                            .custom_formatter(|n, _| format!("{:.0}%", n * 100.0)),
+                        );
+                    });
+                    ui.add_space(12.0);
+
+                    // ---- Appearance ----
+                    section_label(ui, "Appearance");
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Preset:");
+                        for (name, pal) in theme::Palette::PRESETS {
+                            if ui.button(name).clicked() {
+                                self.settings.palette = pal;
+                                theme_dirty = true;
+                            }
+                        }
+                    });
+                    ui.collapsing("Customize colors", |ui| {
+                        let p = &mut self.settings.palette;
+                        ui.label(
+                            egui::RichText::new("Interface")
+                                .small()
+                                .color(theme::text_dim()),
+                        );
+                        egui::Grid::new("colors_chrome")
+                            .num_columns(2)
+                            .spacing([10.0, 4.0])
+                            .show(ui, |ui| {
+                                theme_dirty |= color_swatch(ui, "Background", &mut p.bg);
+                                theme_dirty |= color_swatch(ui, "Panels", &mut p.panel);
+                                theme_dirty |= color_swatch(ui, "Text", &mut p.text);
+                                theme_dirty |= color_swatch(ui, "Dim text", &mut p.text_dim);
+                                theme_dirty |= color_swatch(ui, "Cell borders", &mut p.border);
+                                theme_dirty |= color_swatch(ui, "Selection accent", &mut p.accent);
+                                theme_dirty |= color_swatch(ui, "Mount edge", &mut p.mount);
+                                theme_dirty |= color_swatch(ui, "Danger", &mut p.danger);
+                            });
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new("File categories")
+                                .small()
+                                .color(theme::text_dim()),
+                        );
+                        egui::Grid::new("colors_cats")
+                            .num_columns(2)
+                            .spacing([10.0, 4.0])
+                            .show(ui, |ui| {
+                                theme_dirty |= color_swatch(ui, "Cache / junk", &mut p.junk);
+                                theme_dirty |= color_swatch(ui, "Media", &mut p.media);
+                                theme_dirty |= color_swatch(ui, "Archive", &mut p.archive);
+                                theme_dirty |= color_swatch(ui, "Application", &mut p.app);
+                                theme_dirty |= color_swatch(ui, "Code", &mut p.code);
+                                theme_dirty |= color_swatch(ui, "Document", &mut p.document);
+                                theme_dirty |= color_swatch(ui, "Folder", &mut p.folder);
+                                theme_dirty |= color_swatch(ui, "Other", &mut p.other);
+                            });
+                    });
                 });
-            ui.add_space(12.0);
 
-            ui.label(
-                egui::RichText::new("Behavior")
-                    .color(theme::ACCENT)
-                    .strong(),
-            );
-            ui.add_space(4.0);
-            ui.checkbox(&mut self.settings.animations, "Animate zoom transitions");
-            ui.horizontal(|ui| {
-                ui.label("Folder preview depth");
-                ui.add(egui::Slider::new(&mut self.settings.nesting_depth, 0..=2));
-            });
-            ui.add_space(14.0);
-
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.button("Reset to defaults").clicked() {
                     self.settings = Settings::default();
                     self.capturing = None;
+                    theme_dirty = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Close").clicked() {
@@ -1037,12 +1150,37 @@ impl StorageSifterApp {
                 });
             });
         });
+
+        // Re-install the palette once if any color changed this frame.
+        if theme_dirty {
+            theme::set_palette(self.settings.palette);
+            theme::apply(ctx);
+        }
         // A captured Esc is a rebind, not a request to close the dialog.
         if response.should_close() && !just_captured {
             keep = false;
         }
         keep
     }
+}
+
+/// An accent-colored section heading in the settings dialog.
+fn section_label(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text).color(theme::accent()).strong());
+    ui.add_space(4.0);
+}
+
+/// A two-column color row: an opaque-RGB swatch picker plus its label. Returns
+/// whether the color changed this frame.
+fn color_swatch(ui: &mut egui::Ui, label: &str, c: &mut egui::Color32) -> bool {
+    let mut rgb = [c.r(), c.g(), c.b()];
+    let changed = ui.color_edit_button_srgb(&mut rgb).changed();
+    if changed {
+        *c = egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]);
+    }
+    ui.label(label);
+    ui.end_row();
+    changed
 }
 
 /// One clickable filesystem row in the device picker.
@@ -1054,19 +1192,19 @@ fn disk_row(ui: &mut egui::Ui, disk: &DiskInfo) -> egui::Response {
         0.0
     };
     let inner = egui::Frame::group(ui.style())
-        .fill(theme::PANEL)
+        .fill(theme::panel())
         .show(ui, |ui| {
             ui.set_width(520.0);
             ui.label(
                 egui::RichText::new(disk.mount.display().to_string())
                     .monospace()
                     .strong()
-                    .color(theme::TEXT),
+                    .color(theme::text()),
             );
             ui.label(
                 egui::RichText::new(format!("{}  ·  {}", disk.name, disk.fs))
                     .small()
-                    .color(theme::TEXT_DIM),
+                    .color(theme::text_dim()),
             );
             ui.add(egui::ProgressBar::new(frac).text(format!(
                 "{} used · {} free · {} total",
@@ -1100,7 +1238,7 @@ fn context_menu_items(
     ui.label(egui::RichText::new(tree.name(target)).strong());
     ui.separator();
     if ui
-        .button(egui::RichText::new("Safe to delete?").color(theme::MOUNT))
+        .button(egui::RichText::new("Safe to delete?").color(theme::mount()))
         .clicked()
     {
         action = Some(MenuAction::Assess(target));
@@ -1130,7 +1268,7 @@ fn context_menu_items(
         "Delete permanently…".to_owned()
     };
     if ui
-        .button(egui::RichText::new(delete).color(theme::DANGER))
+        .button(egui::RichText::new(delete).color(theme::danger()))
         .clicked()
     {
         action = Some(MenuAction::Delete(ids));
@@ -1181,7 +1319,7 @@ fn prepare_delete(
 }
 
 fn prop_row(ui: &mut egui::Ui, key: &str, value: String) {
-    ui.label(egui::RichText::new(key).color(theme::TEXT_DIM));
+    ui.label(egui::RichText::new(key).color(theme::text_dim()));
     ui.monospace(value);
     ui.end_row();
 }

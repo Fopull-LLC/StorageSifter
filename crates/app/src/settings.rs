@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use eframe::egui::{Key, Modifiers};
 use serde::{Deserialize, Serialize};
 
+use crate::theme::Palette;
+
 /// A single key chord (a key plus modifier flags).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Keybind {
@@ -161,17 +163,47 @@ pub struct Settings {
     pub keys: Keymap,
     /// Animate zoom transitions when drilling in / out.
     pub animations: bool,
-    /// Levels of nested preview drawn inside each folder (0–2).
+    /// Duration of a zoom animation, in seconds (lower = snappier).
+    pub anim_secs: f32,
+    /// Levels of nested preview drawn inside each folder. Higher costs more to
+    /// draw; the UI warns past 2.
     pub nesting_depth: u32,
+    /// Whole-UI scale factor for accessibility (1.0 = 100%).
+    pub ui_scale: f32,
+    /// Customizable color palette.
+    pub palette: Palette,
 }
+
+/// Bounds shared by the slider UI and the load-time clamp.
+pub const ANIM_SECS_RANGE: std::ops::RangeInclusive<f32> = 0.05..=0.60;
+pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.80..=2.00;
+pub const MAX_NESTING_DEPTH: u32 = 6;
+/// Above this, deeper previews are allowed but the UI cautions about cost.
+pub const NESTING_ADVISED_MAX: u32 = 2;
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             keys: Keymap::default(),
             animations: true,
+            anim_secs: 0.22,
             nesting_depth: 1,
+            ui_scale: 1.0,
+            palette: Palette::COOL_DARK,
         }
+    }
+}
+
+impl Settings {
+    /// Clamp numeric fields to sane bounds (guards a hand-edited or stale config).
+    pub fn sanitize(&mut self) {
+        self.anim_secs = self
+            .anim_secs
+            .clamp(*ANIM_SECS_RANGE.start(), *ANIM_SECS_RANGE.end());
+        self.ui_scale = self
+            .ui_scale
+            .clamp(*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end());
+        self.nesting_depth = self.nesting_depth.min(MAX_NESTING_DEPTH);
     }
 }
 
@@ -184,10 +216,12 @@ fn config_path() -> Option<PathBuf> {
 
 impl Settings {
     pub fn load() -> Settings {
-        config_path()
+        let mut settings: Settings = config_path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        settings.sanitize();
+        settings
     }
 
     pub fn save(&self) {
