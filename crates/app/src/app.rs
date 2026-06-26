@@ -39,6 +39,8 @@ pub struct StorageSifterApp {
     capturing: Option<Action>,
     /// System package managers detected once at startup, for cleanup advice.
     pkgs: Vec<assess::PkgManager>,
+    /// Cached stipple texture marking the hovered drill target (built lazily).
+    dither: Option<egui::TextureHandle>,
 }
 
 struct DiskInfo {
@@ -123,6 +125,7 @@ impl StorageSifterApp {
             settings,
             capturing: None,
             pkgs: assess::detect_package_managers(),
+            dither: None,
         }
     }
 
@@ -418,6 +421,10 @@ impl StorageSifterApp {
     }
 
     fn treemap(&mut self, ui: &mut egui::Ui) {
+        let dither = self
+            .dither
+            .get_or_insert_with(|| treemap_view::make_dither_texture(ui.ctx()))
+            .id();
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
                 let running = matches!(self.scan.as_ref(), Some(Scan::Running { .. }));
@@ -543,6 +550,7 @@ impl StorageSifterApp {
                 anim,
                 &self.selection,
                 self.settings.nesting_depth,
+                dither,
             );
             self.last_area = it.area;
             self.hovered = it.hovered.map(|h| h.id);

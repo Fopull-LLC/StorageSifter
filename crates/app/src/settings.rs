@@ -186,7 +186,7 @@ impl Default for Settings {
         Settings {
             keys: Keymap::default(),
             animations: true,
-            anim_secs: 0.22,
+            anim_secs: 0.375,
             nesting_depth: 1,
             ui_scale: 1.0,
             palette: Palette::COOL_DARK,

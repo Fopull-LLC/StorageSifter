@@ -73,6 +73,7 @@ pub fn show(
     anim: Option<Anim>,
     selection: &HashSet<NodeId>,
     nesting: u32,
+    dither: egui::TextureId,
 ) -> Interaction {
     // Snapshot the palette once per frame; cells read fields off this copy.
     let pal = theme::palette();
@@ -176,6 +177,25 @@ pub fn show(
         draw_cell(&ctx, id, *rect, nesting, &mut hovered);
     }
 
+    // Mark the top-level cell a click would drill into, with a subtle tiled
+    // stipple (tinted by the accent so it reads on any palette). One textured
+    // quad — no per-pixel cost.
+    if let Some(p) = response.hover_pos() {
+        if let Some(drill) = children
+            .iter()
+            .zip(&rects)
+            .map(|(_, r)| to_screen(*r))
+            .find(|r| r.contains(p))
+        {
+            const TILE: f32 = 4.0; // texels map 1:1 onto this many points
+            let uv = ERect::from_min_max(
+                Pos2::ZERO,
+                Pos2::new(drill.width() / TILE, drill.height() / TILE),
+            );
+            painter.image(dither, drill, uv, pal.accent);
+        }
+    }
+
     let modifiers = ui.input(|i| i.modifiers);
     let modified = modifiers.ctrl || modifiers.shift || modifiers.mac_cmd;
 
@@ -206,6 +226,35 @@ pub fn show(
         response,
         area,
     }
+}
+
+/// Build the small repeating stipple used to mark the hovered drill target.
+/// Create once at startup and reuse the handle (drop frees the texture).
+pub fn make_dither_texture(ctx: &egui::Context) -> egui::TextureHandle {
+    // 4×4 dispersed (Bayer-ish) dither: a quarter of the texels are lit white,
+    // the rest transparent. Tinted by the accent at paint time, tiled with
+    // Nearest filtering so it stays crisp.
+    const N: usize = 4;
+    let lit = Color32::from_white_alpha(150);
+    let mut pixels = vec![Color32::TRANSPARENT; N * N];
+    for (x, y) in [(1, 0), (3, 1), (0, 2), (2, 3)] {
+        pixels[y * N + x] = lit;
+    }
+    let image = egui::ColorImage {
+        size: [N, N],
+        pixels,
+        ..Default::default()
+    };
+    ctx.load_texture(
+        "ss_hover_dither",
+        image,
+        egui::TextureOptions {
+            magnification: egui::TextureFilter::Nearest,
+            minification: egui::TextureFilter::Nearest,
+            wrap_mode: egui::TextureWrapMode::Repeat,
+            ..Default::default()
+        },
+    )
 }
 
 /// The screen rect a given `child` of `parent` would occupy in `area`.

@@ -12,8 +12,11 @@ All notable changes to StorageSifter are documented here. The format follows
   Contrast, Light) or fine-tune any of the 16 interface/category colors. The
   light preset also switches the chrome to a light theme.
 - **Text / UI size** control for accessibility — scales the whole interface.
-- **Animation speed** control, and the ability to raise **folder preview depth**
-  beyond 2 (with a performance caution).
+- **Animation speed** control (default a touch smoother at 0.375 s), and the
+  ability to raise **folder preview depth** beyond 2 (with a performance caution).
+- **Hover drill-target highlight**: the top-level cell a click would drill into
+  is marked with a subtle accent-tinted stipple, so it's clear where you're
+  about to zoom.
 
 All of these persist to `settings.json` and apply live. The treemap snapshots
 the active palette once per frame, so customization adds no per-cell cost.
