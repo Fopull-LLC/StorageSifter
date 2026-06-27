@@ -1,6 +1,6 @@
 # Maintainer: Ty Johnston (Fopull LLC) <CHANGE_ME@example.com>
 pkgname=storagesifter
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Fast, GPU-accelerated disk-usage treemap visualizer for Linux"
 arch=('x86_64')
@@ -9,8 +9,8 @@ license=('MIT')
 depends=('gcc-libs' 'vulkan-icd-loader' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'alsa-lib')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
-# Checksum of the v0.1.0 source tarball; re-run `updpkgsums` on each version bump.
-sha256sums=('fa0c707551f0d782239702d40f780108745bacb6ed9bbefb69d36bc0342bf2db')
+# Run `updpkgsums` before publishing (once the v0.2.0 tag tarball is on GitHub).
+sha256sums=('SKIP')
 
 prepare() {
     cd "StorageSifter-${pkgver}"

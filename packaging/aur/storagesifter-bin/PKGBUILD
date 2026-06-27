@@ -1,7 +1,7 @@
 # Maintainer: Ty Johnston (Fopull LLC) <CHANGE_ME@example.com>
 pkgname=storagesifter-bin
 _pkgname=storagesifter
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Fast, GPU-accelerated disk-usage treemap visualizer for Linux (prebuilt binary)"
 arch=('x86_64')
@@ -13,8 +13,8 @@ conflicts=("$_pkgname")
 options=('!strip' '!debug')
 _dir="storagesifter-v${pkgver}-x86_64-linux"
 source=("${_dir}.tar.gz::${url}/releases/download/v${pkgver}/${_dir}.tar.gz")
-# Checksum of the v0.1.0 release tarball; re-run `updpkgsums` on each version bump.
-sha256sums=('6f36e01e19c128b65d2624f254d33893812ac6f8166ca931ee1ba225571f0877')
+# Run `updpkgsums` before publishing (once the v0.2.0 release asset is uploaded).
+sha256sums=('SKIP')
 
 package() {
     cd "$_dir"
