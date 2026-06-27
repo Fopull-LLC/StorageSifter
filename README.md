@@ -71,6 +71,8 @@ You can verify any download against the release's `SHA256SUMS.txt`:
   no software-rendering fallback, so a machine without working Vulkan (some VMs,
   very old GPUs) may not launch.
 - A **Wayland or X11** session.
+- **ALSA** (`libasound`, present on every Linux desktop) for in-app audio
+  playback — nothing extra to install.
 - For the **AppImage**, **FUSE 2** (`libfuse2`) — or run it with
   `./StorageSifter-*.AppImage --appimage-extract-and-run`.
 - The prebuilt binaries target **glibc 2.35+** (built on Ubuntu 22.04); current
@@ -146,6 +148,9 @@ archives pink. One level of nested preview is drawn inside each folder.
 
 - **Click** a folder to drill into it — the view zooms in, growing out of the
   cell you clicked.
+- **Click an audio file** to play it in-app — the cell maximizes into a player
+  with play/pause and a scrubbable timeline, so you can listen before deleting.
+  (Video files open in your default player for now.) **Esc** returns to the map.
 - The **breadcrumb** (top bar) shows where you are; click any segment to jump
   back up. **Backspace** or **Esc** goes up one level.
 - **Hover** a cell to read its full path, size, and category in the status bar.

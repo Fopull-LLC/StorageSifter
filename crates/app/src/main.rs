@@ -10,6 +10,7 @@
 mod app;
 mod assess;
 mod ops;
+mod player;
 mod scan;
 mod settings;
 mod theme;

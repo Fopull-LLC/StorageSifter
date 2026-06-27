@@ -8,6 +8,13 @@ All notable changes to StorageSifter are documented here. The format follows
 
 ### Added
 
+- **In-app audio playback.** Click an audio file (mp3, flac, wav, ogg, m4a, …)
+  and it maximizes into a player with a play/pause button, a scrubbable timeline,
+  and the filename — so you can listen before deciding to delete, without
+  leaving the app. Pure-Rust decoding (Symphonia) and ALSA output, so the binary
+  stays self-contained. Clicking a video file opens it in your default player for
+  now (in-app video is a planned follow-up). Escape or Close returns to the map.
+
 - **Customizable color palette** in Settings: pick a preset (Cool Dark, High
   Contrast, Light) or fine-tune any of the 16 interface/category colors. The
   light preset also switches the chrome to a light theme.

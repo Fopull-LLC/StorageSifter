@@ -95,6 +95,14 @@ pub fn reveal(path: &Path) {
     }
 }
 
+/// Open `path` itself in the system's default application (e.g. a video in the
+/// default media player). Does nothing if the file no longer exists.
+pub fn open_external(path: &Path) {
+    if path.exists() {
+        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

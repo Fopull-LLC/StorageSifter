@@ -20,6 +20,13 @@ eframe = { version = "=0.34.3", default-features = false, features = ["wgpu", "d
 # Decodes the embedded window icon (PNG → RGBA8). eframe already pulls `image`
 # transitively, so pinning to its resolved version adds no extra build cost.
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
+# In-app audio playback (pure-Rust decode via Symphonia, output via cpal/ALSA —
+# present on every Linux desktop, so the binary stays self-contained).
+rodio = { version = "0.20", default-features = false, features = ["symphonia-all"] }
+# Used directly only to read accurate track durations: rodio 0.20's own
+# `total_duration` mis-converts Symphonia's time (whole-second files come back
+# inflated). Same version rodio already pulls, so no extra build cost.
+symphonia = { version = "=0.5.5", default-features = false, features = ["aac", "adpcm", "aiff", "alac", "flac", "isomp4", "mkv", "mp3", "ogg", "pcm", "vorbis", "wav"] }
 scanner = { path = "../scanner" }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_json = "=1.0.150"

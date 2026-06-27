@@ -13,6 +13,7 @@ pkgbase = storagesifter-bin
 	depends = libxcursor
 	depends = libxi
 	depends = libxrandr
+	depends = alsa-lib
 	provides = storagesifter
 	conflicts = storagesifter
 	options = !strip

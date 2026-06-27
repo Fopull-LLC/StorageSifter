@@ -10,6 +10,7 @@ use scanner::{NodeId, NodeKind, Tree};
 
 use crate::assess::{self, Assessment};
 use crate::ops;
+use crate::player::{self, AudioPlayer, MediaKind};
 use crate::scan::Scan;
 use crate::settings::{Action, Keybind, SavedPalette, Settings};
 use crate::theme::{self, format_size};
@@ -46,6 +47,41 @@ pub struct StorageSifterApp {
     import_name: String,
     import_code: String,
     palette_msg: Option<String>,
+    /// Maximized media view (when a media file is opened), if any.
+    media: Option<MediaView>,
+}
+
+/// The maximized in-app media view for a clicked audio/video file.
+struct MediaView {
+    name: String,
+    path: PathBuf,
+    kind: MediaKind,
+    /// The audio player (audio files only, and only if it opened successfully).
+    player: Option<AudioPlayer>,
+    /// Why audio playback couldn't start, if it failed.
+    error: Option<String>,
+    /// While dragging the timeline: the scrubbed position in seconds.
+    scrub: Option<f32>,
+}
+
+impl MediaView {
+    fn open(name: String, path: PathBuf, kind: MediaKind) -> MediaView {
+        let (player, error) = match kind {
+            MediaKind::Audio => match AudioPlayer::open(&path) {
+                Ok(p) => (Some(p), None),
+                Err(e) => (None, Some(e)),
+            },
+            MediaKind::Video => (None, None),
+        };
+        MediaView {
+            name,
+            path,
+            kind,
+            player,
+            error,
+            scrub: None,
+        }
+    }
 }
 
 struct DiskInfo {
@@ -135,6 +171,7 @@ impl StorageSifterApp {
             import_name: String::new(),
             import_code: String::new(),
             palette_msg: None,
+            media: None,
         }
     }
 
@@ -150,6 +187,7 @@ impl StorageSifterApp {
         self.selection.clear();
         self.dialog = Dialog::None;
         self.status = None;
+        self.media = None;
     }
 }
 
@@ -186,9 +224,19 @@ impl eframe::App for StorageSifterApp {
         }
 
         self.toolbar(ui);
-        self.selection_bar(ui);
-        self.status_bar(ui);
-        self.treemap(ui);
+        if self.media.is_some() {
+            // Keep the timeline live, and close on Escape.
+            ui.ctx().request_repaint();
+            if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.media = None;
+            } else {
+                self.media_view(ui);
+            }
+        } else {
+            self.selection_bar(ui);
+            self.status_bar(ui);
+            self.treemap(ui);
+        }
         self.dialogs(ui.ctx());
     }
 }
@@ -248,6 +296,7 @@ impl StorageSifterApp {
                         scan.cancel();
                     }
                     self.scan = None;
+                    self.media = None;
                     self.disks = list_disks();
                 }
                 if ui.button("⟳  Rescan").clicked() {
@@ -429,6 +478,119 @@ impl StorageSifterApp {
         });
     }
 
+    /// The maximized media view: an audio transport (or, for video, a launch
+    /// button), filling the window over the treemap.
+    fn media_view(&mut self, ui: &mut egui::Ui) {
+        let mut close = false;
+        let mut open_ext = false;
+        let mut restart = false;
+
+        // Bottom transport bar.
+        egui::Panel::bottom("media_controls").show_inside(ui, |ui| {
+            ui.add_space(6.0);
+            if let Some(media) = self.media.as_mut() {
+                ui.horizontal(|ui| match (media.player.as_ref(), media.kind) {
+                    (Some(player), _) => {
+                        let done = player.finished();
+                        let playing = !player.is_paused() && !done;
+                        if transport_button(ui, playing) {
+                            if done {
+                                restart = true;
+                            } else {
+                                player.toggle_pause();
+                            }
+                        }
+                        let total = player.duration().map(|d| d.as_secs_f32()).unwrap_or(0.0);
+                        let live = player.position().as_secs_f32();
+                        let shown = media.scrub.unwrap_or(live).clamp(0.0, total.max(0.001));
+                        ui.monospace(fmt_time(shown));
+                        let mut v = shown;
+                        let resp = ui.add_sized(
+                            egui::vec2(ui.available_width() - 56.0, 16.0),
+                            egui::Slider::new(&mut v, 0.0..=total.max(0.001)).show_value(false),
+                        );
+                        if resp.dragged() {
+                            media.scrub = Some(v);
+                        }
+                        if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+                            player.seek(std::time::Duration::from_secs_f32(v));
+                            media.scrub = None;
+                        }
+                        ui.monospace(fmt_time(total));
+                    }
+                    (None, MediaKind::Video) => {
+                        if ui.button("▶  Open in external player").clicked() {
+                            open_ext = true;
+                        }
+                        ui.label(
+                            egui::RichText::new("In-app video preview is coming soon.")
+                                .color(theme::text_dim()),
+                        );
+                    }
+                    (None, MediaKind::Audio) => {
+                        ui.label(
+                            egui::RichText::new(
+                                media
+                                    .error
+                                    .as_deref()
+                                    .unwrap_or("Couldn't play this audio."),
+                            )
+                            .color(theme::danger()),
+                        );
+                    }
+                });
+            }
+            ui.add_space(6.0);
+        });
+
+        // Central content: a close button, then a centered glyph + filename.
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(theme::bg()))
+            .show_inside(ui, |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    if ui.button("×  Close").clicked() {
+                        close = true;
+                    }
+                });
+                if let Some(media) = self.media.as_ref() {
+                    let glyph = match media.kind {
+                        MediaKind::Audio => "♪",
+                        MediaKind::Video => "▶",
+                    };
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() * 0.32);
+                        ui.label(
+                            egui::RichText::new(glyph)
+                                .size(72.0)
+                                .color(theme::text_dim()),
+                        );
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(&media.name)
+                                .size(20.0)
+                                .strong()
+                                .color(theme::text()),
+                        );
+                    });
+                }
+            });
+
+        if open_ext {
+            if let Some(m) = self.media.as_ref() {
+                ops::open_external(&m.path);
+            }
+        }
+        if restart {
+            if let Some(media) = self.media.as_mut() {
+                media.player = AudioPlayer::open(&media.path).ok();
+                media.scrub = None;
+            }
+        }
+        if close {
+            self.media = None;
+        }
+    }
+
     fn treemap(&mut self, ui: &mut egui::Ui) {
         let dither = treemap_view::Dither {
             tex: self
@@ -588,6 +750,14 @@ impl StorageSifterApp {
                             });
                         }
                         self.current = hit.id;
+                    } else if node.kind != NodeKind::Dir {
+                        // A media file: maximize into the in-app media view.
+                        if let Some(kind) = player::media_kind(tree.name(hit.id)) {
+                            let name = tree.name(hit.id).to_owned();
+                            let path = tree.path(hit.id);
+                            self.media = Some(MediaView::open(name, path, kind));
+                            self.selection.clear();
+                        }
                     }
                 }
             }
@@ -1322,6 +1492,52 @@ impl StorageSifterApp {
             keep = false;
         }
         keep
+    }
+}
+
+/// A play/pause toggle drawn with the painter (no font-glyph dependency, so the
+/// icon is always crisp). `playing` shows the pause bars; otherwise a play
+/// triangle. Returns whether it was clicked.
+fn transport_button(ui: &mut egui::Ui, playing: bool) -> bool {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 24.0), egui::Sense::click());
+    let vis = ui.style().interact(&resp);
+    let painter = ui.painter();
+    painter.rect_filled(rect, 4.0, vis.weak_bg_fill);
+    let c = rect.center();
+    let col = vis.fg_stroke.color;
+    if playing {
+        let (bw, gap, h) = (3.0_f32, 4.0_f32, 11.0_f32);
+        let off = gap / 2.0 + bw / 2.0;
+        painter.rect_filled(
+            egui::Rect::from_center_size(egui::pos2(c.x - off, c.y), egui::vec2(bw, h)),
+            0.0,
+            col,
+        );
+        painter.rect_filled(
+            egui::Rect::from_center_size(egui::pos2(c.x + off, c.y), egui::vec2(bw, h)),
+            0.0,
+            col,
+        );
+    } else {
+        let s = 6.0_f32;
+        let tri = vec![
+            egui::pos2(c.x - s * 0.5, c.y - s),
+            egui::pos2(c.x - s * 0.5, c.y + s),
+            egui::pos2(c.x + s * 0.9, c.y),
+        ];
+        painter.add(egui::Shape::convex_polygon(tri, col, egui::Stroke::NONE));
+    }
+    resp.clicked()
+}
+
+/// Format a duration in seconds as `M:SS` (or `H:MM:SS` past an hour).
+fn fmt_time(secs: f32) -> String {
+    let s = secs.max(0.0) as u64;
+    let (h, m, sec) = (s / 3600, (s % 3600) / 60, s % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{sec:02}")
+    } else {
+        format!("{m}:{sec:02}")
     }
 }
 

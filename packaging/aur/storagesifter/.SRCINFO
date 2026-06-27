@@ -14,6 +14,7 @@ pkgbase = storagesifter
 	depends = libxcursor
 	depends = libxi
 	depends = libxrandr
+	depends = alsa-lib
 	source = storagesifter-0.1.0.tar.gz::https://github.com/Fopull-LLC/StorageSifter/archive/refs/tags/v0.1.0.tar.gz
 	sha256sums = fa0c707551f0d782239702d40f780108745bacb6ed9bbefb69d36bc0342bf2db
 
