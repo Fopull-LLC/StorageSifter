@@ -75,24 +75,24 @@ palette!(
 );
 
 impl Palette {
-    /// The default cool/dark theme.
+    /// The default theme (authored via a palette code, set as the default).
     pub const COOL_DARK: Palette = Palette {
-        bg: Color32::from_rgb(0x11, 0x13, 0x20),
+        bg: Color32::from_rgb(0x00, 0x02, 0x1b),
         panel: Color32::from_rgb(0x19, 0x1c, 0x2b),
         border: Color32::from_rgb(0x0a, 0x0b, 0x12),
         text: Color32::from_rgb(0xea, 0xed, 0xf4),
         text_dim: Color32::from_rgb(0x88, 0x8f, 0xa6),
-        accent: Color32::from_rgb(0xff, 0x7e, 0xb6),
+        accent: Color32::from_rgb(0x9e, 0x9e, 0x9e),
         mount: Color32::from_rgb(0x58, 0xd2, 0xc2),
-        danger: Color32::from_rgb(0xec, 0x5f, 0x78),
-        junk: Color32::from_rgb(0xd9, 0x6a, 0x96),
+        danger: Color32::from_rgb(0xe4, 0x00, 0x00),
+        junk: Color32::from_rgb(0xd5, 0x40, 0x84),
         media: Color32::from_rgb(0x46, 0xc2, 0xa2),
-        archive: Color32::from_rgb(0xc5, 0x6f, 0xd0),
-        app: Color32::from_rgb(0x9b, 0x7b, 0xea),
-        code: Color32::from_rgb(0x6f, 0x8b, 0xf2),
-        document: Color32::from_rgb(0x54, 0xc2, 0xdd),
-        folder: Color32::from_rgb(0x38, 0x45, 0x6a),
-        other: Color32::from_rgb(0x52, 0x5b, 0x72),
+        archive: Color32::from_rgb(0xc3, 0x44, 0xd2),
+        app: Color32::from_rgb(0x00, 0xff, 0x7d),
+        code: Color32::from_rgb(0x50, 0x00, 0xff),
+        document: Color32::from_rgb(0x00, 0xd7, 0xda),
+        folder: Color32::from_rgb(0x1e, 0x22, 0x35),
+        other: Color32::from_rgb(0x2e, 0x34, 0x4f),
     };
 
     /// Maximum-legibility theme: near-black backdrop, pure-white text, vivid and
@@ -466,11 +466,14 @@ mod tests {
         assert_eq!(Palette::from_code("hello"), None);
         assert_eq!(Palette::from_code("SSP1-"), None);
         assert_eq!(Palette::from_code("SSP1-!!!!"), None); // invalid base64 chars
-                                                           // A corrupted-but-well-formed code fails the checksum.
-        let mut code = Palette::COOL_DARK.to_code();
-        let last = code.pop().unwrap();
-        code.push(if last == 'A' { 'B' } else { 'A' });
-        assert_eq!(Palette::from_code(&code), None);
+                                                           // A corrupted-but-well-formed code fails the checksum. Flip the first
+                                                           // body character (just past the prefix) so a real color byte changes.
+        let code = Palette::COOL_DARK.to_code();
+        let mut chars: Vec<char> = code.chars().collect();
+        let i = CODE_PREFIX.len();
+        chars[i] = if chars[i] == 'A' { 'B' } else { 'A' };
+        let corrupted: String = chars.into_iter().collect();
+        assert_eq!(Palette::from_code(&corrupted), None);
     }
 
     #[test]

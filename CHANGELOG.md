@@ -20,7 +20,12 @@ All notable changes to StorageSifter are documented here. The format follows
   ability to raise **folder preview depth** beyond 2 (with a performance caution).
 - **Hover drill-target highlight**: the top-level cell a click would drill into
   is marked with a subtle accent-tinted stipple, so it's clear where you're
-  about to zoom.
+  about to zoom. Its **size and strength are adjustable** in Settings (or set
+  the strength to 0 to turn it off).
+
+### Changed
+
+- New default color theme.
 
 All of these persist to `settings.json` and apply live. The treemap snapshots
 the active palette once per frame, so customization adds no per-cell cost.

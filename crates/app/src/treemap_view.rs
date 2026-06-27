@@ -37,6 +37,17 @@ pub struct Hit {
     pub rect: ERect,
 }
 
+/// How to draw the hover drill-target stipple.
+#[derive(Clone, Copy)]
+pub struct Dither {
+    /// The tiling stipple texture (see [`make_dither_texture`]).
+    pub tex: egui::TextureId,
+    /// Tile size in points — bigger is coarser.
+    pub scale: f32,
+    /// Opacity, 0 (off) … 1 (full).
+    pub strength: f32,
+}
+
 /// One frame of an in-progress zoom between `parent` and `child`, connected at
 /// the `pivot` cell.
 #[derive(Clone, Copy)]
@@ -73,7 +84,7 @@ pub fn show(
     anim: Option<Anim>,
     selection: &HashSet<NodeId>,
     nesting: u32,
-    dither: egui::TextureId,
+    dither: Dither,
 ) -> Interaction {
     // Snapshot the palette once per frame; cells read fields off this copy.
     let pal = theme::palette();
@@ -177,22 +188,29 @@ pub fn show(
         draw_cell(&ctx, id, *rect, nesting, &mut hovered);
     }
 
-    // Mark the top-level cell a click would drill into, with a subtle tiled
-    // stipple (tinted by the accent so it reads on any palette). One textured
-    // quad — no per-pixel cost.
-    if let Some(p) = response.hover_pos() {
-        if let Some(drill) = children
-            .iter()
-            .zip(&rects)
-            .map(|(_, r)| to_screen(*r))
-            .find(|r| r.contains(p))
-        {
-            const TILE: f32 = 4.0; // texels map 1:1 onto this many points
-            let uv = ERect::from_min_max(
-                Pos2::ZERO,
-                Pos2::new(drill.width() / TILE, drill.height() / TILE),
-            );
-            painter.image(dither, drill, uv, pal.accent);
+    // Mark the top-level cell a click would drill into, with a tiled stipple
+    // (tinted by the accent so it reads on any palette). One textured quad — no
+    // per-pixel cost. Size and opacity are user-configurable.
+    if dither.strength > 0.01 {
+        if let Some(p) = response.hover_pos() {
+            if let Some(drill) = children
+                .iter()
+                .zip(&rects)
+                .map(|(_, r)| to_screen(*r))
+                .find(|r| r.contains(p))
+            {
+                let scale = dither.scale.max(2.0); // tile size in points
+                let uv = ERect::from_min_max(
+                    Pos2::ZERO,
+                    Pos2::new(drill.width() / scale, drill.height() / scale),
+                );
+                painter.image(
+                    dither.tex,
+                    drill,
+                    uv,
+                    pal.accent.gamma_multiply(dither.strength),
+                );
+            }
         }
     }
 
@@ -231,13 +249,15 @@ pub fn show(
 /// Build the small repeating stipple used to mark the hovered drill target.
 /// Create once at startup and reuse the handle (drop frees the texture).
 pub fn make_dither_texture(ctx: &egui::Context) -> egui::TextureHandle {
-    // 4×4 dispersed (Bayer-ish) dither: a quarter of the texels are lit white,
-    // the rest transparent. Tinted by the accent at paint time, tiled with
-    // Nearest filtering so it stays crisp.
+    // 4×4 dispersed (Bayer-ish) dither: a quarter of the texels are lit, the
+    // rest transparent. The lit texels are opaque white so the paint-time tint
+    // (accent × strength) sets both color and opacity. Tiled with Nearest
+    // filtering so it stays crisp; the tile size is user-configurable.
     const N: usize = 4;
-    let lit = Color32::from_white_alpha(150);
+    let lit = Color32::WHITE;
     let mut pixels = vec![Color32::TRANSPARENT; N * N];
-    for (x, y) in [(1, 0), (3, 1), (0, 2), (2, 3)] {
+    // Two dots per tile → an even, sparse diagonal grid (light, not a weave).
+    for (x, y) in [(0, 0), (2, 2)] {
         pixels[y * N + x] = lit;
     }
     let image = egui::ColorImage {

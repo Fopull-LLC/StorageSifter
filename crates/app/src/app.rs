@@ -430,10 +430,14 @@ impl StorageSifterApp {
     }
 
     fn treemap(&mut self, ui: &mut egui::Ui) {
-        let dither = self
-            .dither
-            .get_or_insert_with(|| treemap_view::make_dither_texture(ui.ctx()))
-            .id();
+        let dither = treemap_view::Dither {
+            tex: self
+                .dither
+                .get_or_insert_with(|| treemap_view::make_dither_texture(ui.ctx()))
+                .id(),
+            scale: self.settings.dither_scale,
+            strength: self.settings.dither_strength,
+        };
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
                 let running = matches!(self.scan.as_ref(), Some(Scan::Running { .. }));
@@ -1082,6 +1086,23 @@ impl StorageSifterApp {
                             .color(theme::danger()),
                         );
                     }
+                    ui.horizontal(|ui| {
+                        ui.label("Hover highlight size");
+                        ui.add(egui::Slider::new(
+                            &mut self.settings.dither_scale,
+                            crate::settings::DITHER_SCALE_RANGE,
+                        ));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Hover highlight strength");
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.settings.dither_strength,
+                                crate::settings::DITHER_STRENGTH_RANGE,
+                            )
+                            .custom_formatter(|n, _| format!("{:.0}%", n * 100.0)),
+                        );
+                    });
                     ui.add_space(12.0);
 
                     // ---- Accessibility ----

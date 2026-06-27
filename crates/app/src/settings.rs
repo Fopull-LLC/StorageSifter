@@ -178,6 +178,10 @@ pub struct Settings {
     pub nesting_depth: u32,
     /// Whole-UI scale factor for accessibility (1.0 = 100%).
     pub ui_scale: f32,
+    /// Hover drill-target stipple: tile size in points (bigger = coarser).
+    pub dither_scale: f32,
+    /// Hover drill-target stipple: opacity (0 = off, 1 = full).
+    pub dither_strength: f32,
     /// Customizable color palette (the active one).
     pub palette: Palette,
     /// User-saved palettes (deletable), shown next to the built-in presets.
@@ -187,6 +191,8 @@ pub struct Settings {
 /// Bounds shared by the slider UI and the load-time clamp.
 pub const ANIM_SECS_RANGE: std::ops::RangeInclusive<f32> = 0.05..=0.60;
 pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.80..=2.00;
+pub const DITHER_SCALE_RANGE: std::ops::RangeInclusive<f32> = 6.0..=48.0;
+pub const DITHER_STRENGTH_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.0;
 pub const MAX_NESTING_DEPTH: u32 = 6;
 /// Above this, deeper previews are allowed but the UI cautions about cost.
 pub const NESTING_ADVISED_MAX: u32 = 2;
@@ -199,6 +205,8 @@ impl Default for Settings {
             anim_secs: 0.375,
             nesting_depth: 1,
             ui_scale: 1.0,
+            dither_scale: 14.0,
+            dither_strength: 0.55,
             palette: Palette::COOL_DARK,
             saved_palettes: Vec::new(),
         }
@@ -214,6 +222,12 @@ impl Settings {
         self.ui_scale = self
             .ui_scale
             .clamp(*UI_SCALE_RANGE.start(), *UI_SCALE_RANGE.end());
+        self.dither_scale = self
+            .dither_scale
+            .clamp(*DITHER_SCALE_RANGE.start(), *DITHER_SCALE_RANGE.end());
+        self.dither_strength = self
+            .dither_strength
+            .clamp(*DITHER_STRENGTH_RANGE.start(), *DITHER_STRENGTH_RANGE.end());
         self.nesting_depth = self.nesting_depth.min(MAX_NESTING_DEPTH);
     }
 }
