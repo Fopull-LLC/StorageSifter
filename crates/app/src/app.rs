@@ -1255,7 +1255,11 @@ impl StorageSifterApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if ui.button("Reset to defaults").clicked() {
+                    // Keep the user's saved palettes — a settings reset shouldn't
+                    // throw away color profiles they imported or saved.
+                    let saved = std::mem::take(&mut self.settings.saved_palettes);
                     self.settings = Settings::default();
+                    self.settings.saved_palettes = saved;
                     self.capturing = None;
                     theme_dirty = true;
                 }
