@@ -11,7 +11,7 @@ use scanner::{NodeId, NodeKind, Tree};
 use crate::assess::{self, Assessment};
 use crate::ops;
 use crate::scan::Scan;
-use crate::settings::{Action, Keybind, Settings};
+use crate::settings::{Action, Keybind, SavedPalette, Settings};
 use crate::theme::{self, format_size};
 use crate::treemap_view;
 
@@ -41,6 +41,11 @@ pub struct StorageSifterApp {
     pkgs: Vec<assess::PkgManager>,
     /// Cached stipple texture marking the hovered drill target (built lazily).
     dither: Option<egui::TextureHandle>,
+    /// Transient settings-dialog buffers for saving / importing palettes.
+    save_name: String,
+    import_name: String,
+    import_code: String,
+    palette_msg: Option<String>,
 }
 
 struct DiskInfo {
@@ -126,6 +131,10 @@ impl StorageSifterApp {
             capturing: None,
             pkgs: assess::detect_package_managers(),
             dither: None,
+            save_name: String::new(),
+            import_name: String::new(),
+            import_code: String::new(),
+            palette_msg: None,
         }
     }
 
@@ -1091,15 +1100,33 @@ impl StorageSifterApp {
 
                     // ---- Appearance ----
                     section_label(ui, "Appearance");
+                    let mut apply_palette: Option<theme::Palette> = None;
+                    let mut delete_saved: Option<usize> = None;
                     ui.horizontal_wrapped(|ui| {
-                        ui.label("Preset:");
+                        ui.label("Theme:");
                         for (name, pal) in theme::Palette::PRESETS {
                             if ui.button(name).clicked() {
-                                self.settings.palette = pal;
-                                theme_dirty = true;
+                                apply_palette = Some(pal);
+                            }
+                        }
+                        // Saved (custom) palettes — clickable, with a hover × to delete.
+                        for (i, sp) in self.settings.saved_palettes.iter().enumerate() {
+                            let (apply, delete) = palette_chip(ui, &sp.name);
+                            if apply {
+                                apply_palette = Some(sp.palette);
+                            }
+                            if delete {
+                                delete_saved = Some(i);
                             }
                         }
                     });
+                    if let Some(i) = delete_saved {
+                        self.settings.saved_palettes.remove(i);
+                    }
+                    if let Some(pal) = apply_palette {
+                        self.settings.palette = pal;
+                        theme_dirty = true;
+                    }
                     ui.collapsing("Customize colors", |ui| {
                         let p = &mut self.settings.palette;
                         ui.label(
@@ -1140,6 +1167,87 @@ impl StorageSifterApp {
                                 theme_dirty |= color_swatch(ui, "Other", &mut p.other);
                             });
                     });
+
+                    ui.add_space(6.0);
+                    ui.collapsing("Share & manage palettes", |ui| {
+                        // Export: the current palette's shareable code.
+                        let code = self.settings.palette.to_code();
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("This palette's code")
+                                    .small()
+                                    .color(theme::text_dim()),
+                            );
+                            if ui.button("Copy").clicked() {
+                                ui.ctx().copy_text(code.clone());
+                                self.palette_msg = Some("Code copied to clipboard.".to_owned());
+                            }
+                        });
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(&code).monospace().small()).wrap(),
+                        );
+
+                        ui.add_space(8.0);
+                        // Save the current colors as a named palette.
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.save_name)
+                                    .hint_text("name")
+                                    .desired_width(130.0),
+                            );
+                            if ui.button("Save current").clicked() {
+                                let pal = self.settings.palette;
+                                let name =
+                                    palette_name(&self.save_name, self.settings.saved_palettes.len());
+                                self.settings
+                                    .saved_palettes
+                                    .push(SavedPalette { name, palette: pal });
+                                self.save_name.clear();
+                                self.palette_msg = Some("Saved to your palettes.".to_owned());
+                            }
+                        });
+
+                        ui.add_space(4.0);
+                        // Import a palette from a shared code.
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.import_name)
+                                    .hint_text("name")
+                                    .desired_width(130.0),
+                            );
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.import_code)
+                                    .hint_text("paste a code")
+                                    .desired_width(190.0),
+                            );
+                            if ui.button("Add").clicked() {
+                                match theme::Palette::from_code(&self.import_code) {
+                                    Some(pal) => {
+                                        let name = palette_name(
+                                            &self.import_name,
+                                            self.settings.saved_palettes.len(),
+                                        );
+                                        self.settings
+                                            .saved_palettes
+                                            .push(SavedPalette { name, palette: pal });
+                                        self.settings.palette = pal;
+                                        theme_dirty = true;
+                                        self.import_code.clear();
+                                        self.import_name.clear();
+                                        self.palette_msg =
+                                            Some("Palette added and applied.".to_owned());
+                                    }
+                                    None => {
+                                        self.palette_msg =
+                                            Some("That code isn't valid.".to_owned());
+                                    }
+                                }
+                            }
+                        });
+                        if let Some(msg) = &self.palette_msg {
+                            ui.label(egui::RichText::new(msg).small().color(theme::text_dim()));
+                        }
+                    });
                 });
 
             ui.add_space(10.0);
@@ -1176,6 +1284,52 @@ impl StorageSifterApp {
 fn section_label(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).color(theme::accent()).strong());
     ui.add_space(4.0);
+}
+
+/// Name a saved palette: the trimmed input, or a generated "Custom N".
+fn palette_name(input: &str, existing: usize) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        format!("Custom {}", existing + 1)
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// A saved-palette chip: click it to apply, or click the × (revealed on hover,
+/// at the top-right corner) to delete it. Returns `(apply, delete)`.
+fn palette_chip(ui: &mut egui::Ui, name: &str) -> (bool, bool) {
+    let b = ui.button(name);
+    let mut apply = b.clicked();
+    let mut delete = false;
+    if b.hovered() {
+        // The × sits inside the chip's top-right corner, so moving onto it keeps
+        // the chip hovered (no flicker). `interact` doesn't disturb layout.
+        let sz = 13.0;
+        let x_rect = egui::Rect::from_min_size(
+            egui::pos2(b.rect.right() - sz, b.rect.top()),
+            egui::vec2(sz, sz),
+        );
+        let x = ui.interact(x_rect, b.id.with("del"), egui::Sense::click());
+        let bg = if x.hovered() {
+            theme::danger()
+        } else {
+            theme::danger().gamma_multiply(0.85)
+        };
+        ui.painter().rect_filled(x_rect, 3.0, bg);
+        ui.painter().text(
+            x_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "×",
+            egui::FontId::proportional(12.0),
+            egui::Color32::WHITE,
+        );
+        if x.clicked() {
+            delete = true;
+            apply = false;
+        }
+    }
+    (apply, delete)
 }
 
 /// A two-column color row: an opaque-RGB swatch picker plus its label. Returns

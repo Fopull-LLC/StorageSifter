@@ -157,6 +157,14 @@ impl Keymap {
     }
 }
 
+/// A user-saved color palette (imported from a code or saved from the current
+/// colors). Shown as a deletable chip alongside the built-in presets.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SavedPalette {
+    pub name: String,
+    pub palette: Palette,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -170,8 +178,10 @@ pub struct Settings {
     pub nesting_depth: u32,
     /// Whole-UI scale factor for accessibility (1.0 = 100%).
     pub ui_scale: f32,
-    /// Customizable color palette.
+    /// Customizable color palette (the active one).
     pub palette: Palette,
+    /// User-saved palettes (deletable), shown next to the built-in presets.
+    pub saved_palettes: Vec<SavedPalette>,
 }
 
 /// Bounds shared by the slider UI and the load-time clamp.
@@ -190,6 +200,7 @@ impl Default for Settings {
             nesting_depth: 1,
             ui_scale: 1.0,
             palette: Palette::COOL_DARK,
+            saved_palettes: Vec::new(),
         }
     }
 }

@@ -34,10 +34,37 @@ mod color_rgb {
 macro_rules! palette {
     ($($field:ident),+ $(,)?) => {
         /// A full set of theme colors. Customizable and persisted in settings.
-        #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
         #[serde(default)]
         pub struct Palette {
             $(#[serde(with = "color_rgb")] pub $field: Color32,)+
+        }
+
+        impl Palette {
+            /// Number of colors in a palette.
+            pub const FIELDS: usize = [$(stringify!($field)),+].len();
+
+            /// Pack the colors into RGB bytes, in field order.
+            fn to_bytes(self) -> Vec<u8> {
+                let mut v = Vec::with_capacity(Self::FIELDS * 3);
+                $( v.extend_from_slice(&[self.$field.r(), self.$field.g(), self.$field.b()]); )+
+                v
+            }
+
+            /// Rebuild from exactly `FIELDS * 3` RGB bytes, in field order.
+            fn from_bytes(b: &[u8]) -> Option<Palette> {
+                if b.len() != Self::FIELDS * 3 {
+                    return None;
+                }
+                let mut chunks = b.chunks_exact(3);
+                $(
+                    let $field = {
+                        let c = chunks.next()?;
+                        Color32::from_rgb(c[0], c[1], c[2])
+                    };
+                )+
+                Some(Palette { $($field,)+ })
+            }
         }
     };
 }
@@ -121,6 +148,80 @@ impl Default for Palette {
     fn default() -> Self {
         Palette::COOL_DARK
     }
+}
+
+/// Prefix marking a StorageSifter palette code (format version 1).
+const CODE_PREFIX: &str = "SSP1-";
+
+impl Palette {
+    /// Encode this palette as a short, shareable code (e.g. to send a friend).
+    pub fn to_code(self) -> String {
+        let mut bytes = self.to_bytes();
+        bytes.push(checksum(&bytes));
+        format!("{CODE_PREFIX}{}", b64_encode(&bytes))
+    }
+
+    /// Decode a palette code. Returns `None` if it's malformed, the wrong
+    /// length, or the checksum doesn't match (so typos are rejected cleanly).
+    pub fn from_code(code: &str) -> Option<Palette> {
+        let body = code.trim().strip_prefix(CODE_PREFIX)?;
+        let bytes = b64_decode(body)?;
+        let (&sum, data) = bytes.split_last()?;
+        if sum != checksum(data) {
+            return None;
+        }
+        Palette::from_bytes(data)
+    }
+}
+
+fn checksum(bytes: &[u8]) -> u8 {
+    bytes.iter().fold(0u8, |acc, b| acc.wrapping_add(*b))
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn b64_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(B64[(n >> 18 & 63) as usize] as char);
+        out.push(B64[(n >> 12 & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(B64[(n >> 6 & 63) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(B64[(n & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+fn b64_decode(s: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| B64.iter().position(|&x| x == c).map(|p| p as u32);
+    let mut out = Vec::with_capacity(s.len() / 4 * 3 + 3);
+    for chunk in s.as_bytes().chunks(4) {
+        let mut acc = 0u32;
+        for &c in chunk {
+            acc = (acc << 6) | val(c)?;
+        }
+        match chunk.len() {
+            2 => out.push((acc >> 4) as u8),
+            3 => {
+                out.push((acc >> 10) as u8);
+                out.push((acc >> 2) as u8);
+            }
+            4 => {
+                out.push((acc >> 16) as u8);
+                out.push((acc >> 8) as u8);
+                out.push(acc as u8);
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
 }
 
 static ACTIVE: LazyLock<RwLock<Palette>> = LazyLock::new(|| RwLock::new(Palette::COOL_DARK));
@@ -336,5 +437,47 @@ pub fn format_size(bytes: u64) -> String {
         format!("{value:.1} {}", UNITS[unit])
     } else {
         format!("{value:.2} {}", UNITS[unit])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn palette_code_round_trips() {
+        for pal in [Palette::COOL_DARK, Palette::HIGH_CONTRAST, Palette::LIGHT] {
+            let code = pal.to_code();
+            assert!(code.starts_with(CODE_PREFIX));
+            assert_eq!(Palette::from_code(&code), Some(pal));
+        }
+    }
+
+    #[test]
+    fn code_tolerates_surrounding_whitespace() {
+        let code = Palette::HIGH_CONTRAST.to_code();
+        let padded = format!("  {code}\n");
+        assert_eq!(Palette::from_code(&padded), Some(Palette::HIGH_CONTRAST));
+    }
+
+    #[test]
+    fn bad_codes_are_rejected() {
+        assert_eq!(Palette::from_code(""), None);
+        assert_eq!(Palette::from_code("hello"), None);
+        assert_eq!(Palette::from_code("SSP1-"), None);
+        assert_eq!(Palette::from_code("SSP1-!!!!"), None); // invalid base64 chars
+                                                           // A corrupted-but-well-formed code fails the checksum.
+        let mut code = Palette::COOL_DARK.to_code();
+        let last = code.pop().unwrap();
+        code.push(if last == 'A' { 'B' } else { 'A' });
+        assert_eq!(Palette::from_code(&code), None);
+    }
+
+    #[test]
+    fn base64_round_trips_all_lengths() {
+        for len in 0..50usize {
+            let data: Vec<u8> = (0..len).map(|i| (i * 7 + 1) as u8).collect();
+            assert_eq!(b64_decode(&b64_encode(&data)), Some(data));
+        }
     }
 }

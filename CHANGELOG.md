@@ -11,6 +11,10 @@ All notable changes to StorageSifter are documented here. The format follows
 - **Customizable color palette** in Settings: pick a preset (Cool Dark, High
   Contrast, Light) or fine-tune any of the 16 interface/category colors. The
   light preset also switches the chrome to a light theme.
+- **Shareable palette codes**: export the current palette to a short `SSP1-…`
+  code (one-click copy) and import codes from others. Imported or saved palettes
+  appear as your own chips alongside the presets, and custom ones can be removed
+  with a hover **×**. Save the current colors as a named palette too.
 - **Text / UI size** control for accessibility — scales the whole interface.
 - **Animation speed** control (default a touch smoother at 0.375 s), and the
   ability to raise **folder preview depth** beyond 2 (with a performance caution).
