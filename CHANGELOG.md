@@ -25,7 +25,8 @@ All notable changes to StorageSifter are documented here. The format follows
 
 ### Changed
 
-- New default color theme.
+- New default color theme, and tuned out-of-the-box defaults: folder preview
+  depth 2, UI size 115%, and a calmer hover highlight (size 10, strength 30%).
 
 All of these persist to `settings.json` and apply live. The treemap snapshots
 the active palette once per frame, so customization adds no per-cell cost.
