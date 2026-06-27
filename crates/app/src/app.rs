@@ -1109,13 +1109,33 @@ impl StorageSifterApp {
                     section_label(ui, "Accessibility");
                     ui.horizontal(|ui| {
                         ui.label("Text / UI size");
-                        ui.add(
-                            egui::Slider::new(
-                                &mut self.settings.ui_scale,
-                                crate::settings::UI_SCALE_RANGE,
-                            )
-                            .custom_formatter(|n, _| format!("{:.0}%", n * 100.0)),
+                        // A +/- stepper, not a slider: changing the UI scale moves
+                        // a slider out from under the cursor (a feedback loop that
+                        // runs straight to the end). Discrete 5% steps avoid that,
+                        // and the buttons barely move per click so you can keep
+                        // clicking the same one.
+                        let range = crate::settings::UI_SCALE_RANGE;
+                        let step = 0.05_f32;
+                        let snapped = (self.settings.ui_scale / step).round() * step;
+                        let bsize = egui::vec2(30.0, 0.0);
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new("-").monospace()).min_size(bsize))
+                            .clicked()
+                        {
+                            self.settings.ui_scale =
+                                (snapped - step).clamp(*range.start(), *range.end());
+                        }
+                        ui.add_sized(
+                            egui::vec2(46.0, 20.0),
+                            egui::Label::new(format!("{:.0}%", self.settings.ui_scale * 100.0)),
                         );
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new("+").monospace()).min_size(bsize))
+                            .clicked()
+                        {
+                            self.settings.ui_scale =
+                                (snapped + step).clamp(*range.start(), *range.end());
+                        }
                     });
                     ui.add_space(12.0);
 

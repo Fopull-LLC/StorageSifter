@@ -15,7 +15,9 @@ All notable changes to StorageSifter are documented here. The format follows
   code (one-click copy) and import codes from others. Imported or saved palettes
   appear as your own chips alongside the presets, and custom ones can be removed
   with a hover **×**. Save the current colors as a named palette too.
-- **Text / UI size** control for accessibility — scales the whole interface.
+- **Text / UI size** control for accessibility — scales the whole interface, via
+  a +/- stepper in 5% steps (a slider would move out from under the cursor as the
+  UI rescales).
 - **Animation speed** control (default a touch smoother at 0.375 s), and the
   ability to raise **folder preview depth** beyond 2 (with a performance caution).
 - **Hover drill-target highlight**: the top-level cell a click would drill into
