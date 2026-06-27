@@ -4,7 +4,7 @@ All notable changes to StorageSifter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [Semantic Versioning](https://semver.org).
 
-## [Unreleased]
+## [0.3.0] — 2026-06-27
 
 ### Added
 
@@ -75,5 +75,6 @@ First public release.
 - Distribution: AppImage, prebuilt binary tarball, AUR packages
   (`storagesifter`, `storagesifter-bin`), and `cargo install`.
 
+[0.3.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.1.0

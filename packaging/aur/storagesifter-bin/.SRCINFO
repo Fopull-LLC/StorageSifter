@@ -1,6 +1,6 @@
 pkgbase = storagesifter-bin
 	pkgdesc = Fast, GPU-accelerated disk-usage treemap visualizer for Linux (prebuilt binary)
-	pkgver = 0.2.0
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/Fopull-LLC/StorageSifter
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = storagesifter-bin
 	conflicts = storagesifter
 	options = !strip
 	options = !debug
-	source = storagesifter-v0.2.0-x86_64-linux.tar.gz::https://github.com/Fopull-LLC/StorageSifter/releases/download/v0.2.0/storagesifter-v0.2.0-x86_64-linux.tar.gz
+	source = storagesifter-v0.3.0-x86_64-linux.tar.gz::https://github.com/Fopull-LLC/StorageSifter/releases/download/v0.3.0/storagesifter-v0.3.0-x86_64-linux.tar.gz
 	sha256sums = SKIP
 
 pkgname = storagesifter-bin

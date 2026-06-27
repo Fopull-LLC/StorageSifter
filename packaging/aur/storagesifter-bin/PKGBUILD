@@ -1,7 +1,7 @@
 # Maintainer: Ty Johnston (Fopull LLC) <CHANGE_ME@example.com>
 pkgname=storagesifter-bin
 _pkgname=storagesifter
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Fast, GPU-accelerated disk-usage treemap visualizer for Linux (prebuilt binary)"
 arch=('x86_64')
