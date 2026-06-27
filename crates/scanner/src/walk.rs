@@ -20,12 +20,39 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 
 use crate::tree::{path_of, Node, NodeFlags, NodeId, NodeKind, Tree};
+
+/// Live scan progress, updated by the parallel walk so a UI can show how far
+/// along a scan is. Cheap relaxed atomics; share it via `Arc`.
+#[derive(Default)]
+pub struct Progress {
+    entries: AtomicU64,
+    bytes: AtomicU64,
+}
+
+impl Progress {
+    /// Entries (files + directories) walked so far.
+    pub fn entries(&self) -> u64 {
+        self.entries.load(Ordering::Relaxed)
+    }
+
+    /// On-disk bytes discovered so far (sum of per-entry block sizes). Hard
+    /// links aren't de-duplicated yet, so this can slightly exceed the final
+    /// total — fine for a progress estimate.
+    pub fn bytes(&self) -> u64 {
+        self.bytes.load(Ordering::Relaxed)
+    }
+
+    fn record(&self, own_size: u64) {
+        self.entries.fetch_add(1, Ordering::Relaxed);
+        self.bytes.fetch_add(own_size, Ordering::Relaxed);
+    }
+}
 
 /// Owned, intermediate tree produced by the parallel walk.
 struct Raw {
@@ -50,7 +77,7 @@ pub fn scan(root: &Path) -> io::Result<Tree> {
     let meta = fs::symlink_metadata(root)?;
     let mut allowed = FxHashSet::default();
     allowed.insert(meta.dev());
-    scan_with_allowed(root, allowed, &AtomicBool::new(false))
+    scan_with_allowed(root, allowed, &AtomicBool::new(false), &Progress::default())
 }
 
 /// Like [`scan`], but follows the whole physical filesystem `root` lives on,
@@ -64,9 +91,19 @@ pub fn scan_filesystem(root: &Path) -> io::Result<Tree> {
 /// becomes `true`, returning whatever partial tree it had reached (the caller is
 /// expected to discard it). Lets the UI cancel a long scan or a superseded one.
 pub fn scan_filesystem_cancellable(root: &Path, cancel: &AtomicBool) -> io::Result<Tree> {
+    scan_filesystem_progress(root, cancel, &Progress::default())
+}
+
+/// Like [`scan_filesystem_cancellable`], but updates `progress` live as it walks,
+/// so a UI can show entries/bytes discovered while the scan runs.
+pub fn scan_filesystem_progress(
+    root: &Path,
+    cancel: &AtomicBool,
+    progress: &Progress,
+) -> io::Result<Tree> {
     fs::symlink_metadata(root)?; // surface a clear error if `root` is unreadable
     let allowed = crate::mounts::same_filesystem_devices(root);
-    scan_with_allowed(root, allowed, cancel)
+    scan_with_allowed(root, allowed, cancel, progress)
 }
 
 /// Scan `root`, descending into any child whose device is in `allowed`. Exposed
@@ -75,9 +112,10 @@ pub(crate) fn scan_with_allowed(
     root: &Path,
     allowed: FxHashSet<u64>,
     cancel: &AtomicBool,
+    progress: &Progress,
 ) -> io::Result<Tree> {
     let meta = fs::symlink_metadata(root)?;
-    let raw = build(root.to_path_buf(), &meta, &allowed, cancel);
+    let raw = build(root.to_path_buf(), &meta, &allowed, cancel, progress);
     Ok(flatten(raw, root, meta.dev()))
 }
 
@@ -99,8 +137,15 @@ fn kind_of(meta: &fs::Metadata) -> NodeKind {
 /// and `lstat`-ed; children on a device not in `allowed` are pruned, and the
 /// survivors are recursed into in parallel. A child whose device differs from
 /// its parent's just crossed a mount/subvolume boundary and is flagged.
-fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>, cancel: &AtomicBool) -> Raw {
+fn build(
+    path: PathBuf,
+    meta: &fs::Metadata,
+    allowed: &FxHashSet<u64>,
+    cancel: &AtomicBool,
+    progress: &Progress,
+) -> Raw {
     let own_size = meta.blocks() * 512;
+    progress.record(own_size);
     let name = path
         .file_name()
         .map(|s| s.to_os_string())
@@ -165,7 +210,7 @@ fn build(path: PathBuf, meta: &fs::Metadata, allowed: &FxHashSet<u64>, cancel: &
         .into_par_iter()
         .map(|(p, m)| {
             let is_mount = m.dev() != parent_dev;
-            let mut child = build(p, &m, allowed, cancel);
+            let mut child = build(p, &m, allowed, cancel, progress);
             child.is_mount = is_mount;
             child
         })
@@ -270,7 +315,8 @@ mod tests {
         // Correct device allowed: children are present.
         let mut real = FxHashSet::default();
         real.insert(real_dev);
-        let ok = scan_with_allowed(root, real, &AtomicBool::new(false)).unwrap();
+        let ok =
+            scan_with_allowed(root, real, &AtomicBool::new(false), &Progress::default()).unwrap();
         assert!(ok.len() > 1, "real device should include children");
 
         // Only a foreign device allowed: every child crosses a (simulated)
@@ -278,7 +324,8 @@ mod tests {
         // `du -x` does at a mount point.
         let mut wrong = FxHashSet::default();
         wrong.insert(real_dev.wrapping_add(1));
-        let pruned = scan_with_allowed(root, wrong, &AtomicBool::new(false)).unwrap();
+        let pruned =
+            scan_with_allowed(root, wrong, &AtomicBool::new(false), &Progress::default()).unwrap();
         assert_eq!(pruned.len(), 1, "all foreign-device children pruned");
         assert_eq!(pruned.root, 0);
     }

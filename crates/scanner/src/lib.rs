@@ -22,4 +22,6 @@ mod walk;
 pub mod safety;
 
 pub use tree::{Node, NodeFlags, NodeId, NodeKind, Tree};
-pub use walk::{scan, scan_filesystem, scan_filesystem_cancellable};
+pub use walk::{
+    scan, scan_filesystem, scan_filesystem_cancellable, scan_filesystem_progress, Progress,
+};

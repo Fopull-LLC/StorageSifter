@@ -4,6 +4,16 @@ All notable changes to StorageSifter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Informative scanning screen.** Instead of a bare "Scanning…", the scan now
+  shows live progress: items found, size found, elapsed time, and scan rate.
+  When scanning a whole disk (picked from the device list), it also shows a
+  **percentage bar, the expected total, and an estimated time remaining** (based
+  on the filesystem's used space); for other scans it shows an animated spinner.
+
 ## [0.2.0] — 2026-06-27
 
 ### Added

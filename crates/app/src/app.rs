@@ -49,6 +49,9 @@ pub struct StorageSifterApp {
     palette_msg: Option<String>,
     /// Maximized media view (when a media file is opened), if any.
     media: Option<MediaView>,
+    /// Expected used bytes for the current scan target (a picked disk), enabling
+    /// a percentage + ETA on the scanning screen. `None` for path-arg scans.
+    scan_target: Option<u64>,
 }
 
 /// The maximized in-app media view for a clicked audio/video file.
@@ -172,6 +175,7 @@ impl StorageSifterApp {
             import_code: String::new(),
             palette_msg: None,
             media: None,
+            scan_target: None,
         }
     }
 
@@ -179,7 +183,7 @@ impl StorageSifterApp {
         if let Some(old) = &self.scan {
             old.cancel(); // don't leave a superseded scan churning in the background
         }
-        self.scan = Some(Scan::start(&path));
+        self.scan = Some(Scan::start_with_target(&path, self.scan_target));
         self.path = path;
         self.current = 0;
         self.anim = None;
@@ -262,7 +266,9 @@ impl StorageSifterApp {
                 ui.vertical_centered(|ui| {
                     for disk in &self.disks {
                         if disk_row(ui, disk).clicked() {
-                            chosen = Some(disk.mount.clone());
+                            // Used bytes → the scan's expected total, for a %/ETA.
+                            let used = disk.total.saturating_sub(disk.available);
+                            chosen = Some((disk.mount.clone(), used));
                         }
                         ui.add_space(6.0);
                     }
@@ -282,7 +288,8 @@ impl StorageSifterApp {
         if refresh {
             self.disks = list_disks();
         }
-        if let Some(mount) = chosen {
+        if let Some((mount, used)) = chosen {
+            self.scan_target = Some(used);
             self.open(mount);
         }
     }
@@ -602,30 +609,99 @@ impl StorageSifterApp {
         };
         egui::CentralPanel::default().show_inside(ui, |ui| {
             let Some(Scan::Done { tree, .. }) = self.scan.as_ref() else {
-                let running = matches!(self.scan.as_ref(), Some(Scan::Running { .. }));
-                let msg = match self.scan.as_ref() {
-                    Some(Scan::Running { started, .. }) => {
-                        format!("Scanning…  {:.1}s", started.elapsed().as_secs_f64())
-                    }
-                    Some(Scan::Error(e)) => format!("Scan failed:\n{e}"),
-                    _ => String::new(),
-                };
-                let mut back = false;
+                let mut leave = false;
                 ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() * 0.4);
-                    let color = if running {
-                        theme::text_dim()
-                    } else {
-                        theme::danger()
-                    };
-                    ui.label(egui::RichText::new(msg).color(color).size(16.0));
-                    ui.add_space(12.0);
-                    let label = if running { "Cancel" } else { "Back to devices" };
-                    if ui.button(label).clicked() {
-                        back = true;
+                    ui.add_space(ui.available_height() * 0.28);
+                    match self.scan.as_ref() {
+                        Some(Scan::Running {
+                            started,
+                            progress,
+                            target,
+                            ..
+                        }) => {
+                            let elapsed = started.elapsed().as_secs_f64();
+                            let entries = progress.entries();
+                            let bytes = progress.bytes();
+                            let frac = target.and_then(|t| {
+                                (t > 0).then(|| (bytes as f32 / t as f32).clamp(0.0, 1.0))
+                            });
+
+                            ui.label(
+                                egui::RichText::new("Scanning…")
+                                    .size(22.0)
+                                    .strong()
+                                    .color(theme::text()),
+                            );
+                            ui.add_space(2.0);
+                            ui.label(
+                                egui::RichText::new(self.path.display().to_string())
+                                    .monospace()
+                                    .color(theme::text_dim()),
+                            );
+                            ui.add_space(16.0);
+
+                            match frac {
+                                Some(f) => {
+                                    ui.add(
+                                        egui::ProgressBar::new(f)
+                                            .desired_width(440.0)
+                                            .text(format!("{:.0}%", f * 100.0)),
+                                    );
+                                }
+                                None => {
+                                    ui.add(egui::Spinner::new().size(28.0));
+                                }
+                            }
+                            ui.add_space(16.0);
+
+                            egui::Grid::new("scan_stats")
+                                .num_columns(2)
+                                .spacing([18.0, 6.0])
+                                .show(ui, |ui| {
+                                    stat_row(ui, "Items found", group_thousands(entries));
+                                    stat_row(ui, "Size found", format_size(bytes));
+                                    if let Some(t) = target {
+                                        stat_row(ui, "of about", format_size(*t));
+                                    }
+                                    stat_row(ui, "Elapsed", format!("{elapsed:.1} s"));
+                                    if elapsed > 0.3 {
+                                        let rate = (entries as f64 / elapsed) as u64;
+                                        stat_row(
+                                            ui,
+                                            "Rate",
+                                            format!("{}/s", group_thousands(rate)),
+                                        );
+                                    }
+                                    if let Some(f) = frac {
+                                        if (0.01..0.999).contains(&f) && elapsed > 0.5 {
+                                            let eta = elapsed * (1.0 - f as f64) / f as f64;
+                                            stat_row(ui, "Est. remaining", format!("~{eta:.0} s"));
+                                        }
+                                    }
+                                });
+                            ui.add_space(18.0);
+                            if ui.button("Cancel").clicked() {
+                                leave = true;
+                            }
+                        }
+                        Some(Scan::Error(e)) => {
+                            ui.label(
+                                egui::RichText::new("Scan failed")
+                                    .size(18.0)
+                                    .strong()
+                                    .color(theme::danger()),
+                            );
+                            ui.add_space(6.0);
+                            ui.label(egui::RichText::new(e).color(theme::text_dim()));
+                            ui.add_space(14.0);
+                            if ui.button("Back to devices").clicked() {
+                                leave = true;
+                            }
+                        }
+                        _ => {}
                     }
                 });
-                if back {
+                if leave {
                     if let Some(scan) = &self.scan {
                         scan.cancel();
                     }
@@ -1528,6 +1604,27 @@ fn transport_button(ui: &mut egui::Ui, playing: bool) -> bool {
         painter.add(egui::Shape::convex_polygon(tri, col, egui::Stroke::NONE));
     }
     resp.clicked()
+}
+
+/// A two-column "label: value" row in the scanning-screen stats grid.
+fn stat_row(ui: &mut egui::Ui, label: &str, value: String) {
+    ui.label(egui::RichText::new(label).color(theme::text_dim()));
+    ui.label(egui::RichText::new(value).strong().color(theme::text()));
+    ui.end_row();
+}
+
+/// Format an integer with thousands separators, e.g. `1234567` → `1,234,567`.
+fn group_thousands(n: u64) -> String {
+    let s = n.to_string();
+    let len = s.len();
+    let mut out = String::with_capacity(len + len / 3);
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (len - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Format a duration in seconds as `M:SS` (or `H:MM:SS` past an hour).

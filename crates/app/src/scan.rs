@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use scanner::Tree;
+use scanner::{Progress, Tree};
 
 /// The current state of the one scan the app cares about.
 pub enum Scan {
@@ -20,6 +20,12 @@ pub enum Scan {
         started: Instant,
         rx: Receiver<Result<Tree, String>>,
         cancel: Arc<AtomicBool>,
+        /// Live counts (entries + bytes), updated by the scanner thread.
+        progress: Arc<Progress>,
+        /// On-disk bytes the scan is expected to find (the filesystem's used
+        /// space), for a percentage + ETA. `None` when unknown (e.g. a path-arg
+        /// scan), in which case the UI shows an indeterminate bar.
+        target: Option<u64>,
     },
     Done {
         tree: Tree,
@@ -31,14 +37,22 @@ pub enum Scan {
 impl Scan {
     /// Spawn a whole-filesystem scan of `path` on a background thread.
     pub fn start(path: &Path) -> Scan {
+        Scan::start_with_target(path, None)
+    }
+
+    /// Like [`start`], but records the expected total used bytes so the UI can
+    /// show a real percentage and ETA.
+    pub fn start_with_target(path: &Path, target: Option<u64>) -> Scan {
         let cancel = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(Progress::default());
         let (tx, rx) = mpsc::channel();
         let path = path.to_path_buf();
         let thread_cancel = cancel.clone();
+        let thread_progress = progress.clone();
         thread::spawn(move || {
             // Whole physical filesystem, crossing btrfs subvolumes; abandons the
-            // walk if the UI sets the cancel flag.
-            let result = scanner::scan_filesystem_cancellable(&path, &thread_cancel)
+            // walk if the UI sets the cancel flag, and reports progress as it goes.
+            let result = scanner::scan_filesystem_progress(&path, &thread_cancel, &thread_progress)
                 .map_err(|e| e.to_string());
             let _ = tx.send(result);
         });
@@ -46,6 +60,8 @@ impl Scan {
             started: Instant::now(),
             rx,
             cancel,
+            progress,
+            target,
         }
     }
 
