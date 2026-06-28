@@ -7,7 +7,12 @@ but native, GPU-accelerated, and built for a single Linux machine.
 
 A free and open-source project by **[Fopull LLC](https://fopull.com)**.
 
-![StorageSifter showing a treemap of the root filesystem with a "Safe to delete?" report open on /var/cache, recommending the pacman cleanup command](assets/Screenshots/ss2.png)
+![StorageSifter showing a squarified treemap of a large directory — every file sized by what it uses on disk, colored by what it is](assets/Screenshots/screenshot-treemap.png)
+
+Right-click any file or folder for a **"Safe to delete?"** verdict — here, game
+audio is flagged *"Probably keep — personal media."*
+
+![A "Safe to delete?" report open over a treemap, identifying a file as personal media and advising you keep it](assets/Screenshots/screenshot-safe-to-delete.png)
 
 > **v0.1.0 — first public release.** A complete, daily-usable disk visualizer:
 > scanning engine, squarified treemap (drill-down, breadcrumb, animated zoom), a
@@ -144,7 +149,7 @@ and everything inside them glow **amber** so reclaimable space stands out at a
 glance, with media green, applications cyan, code blue, documents yellow, and
 archives pink. One level of nested preview is drawn inside each folder.
 
-![A treemap of a home directory, colored by category, with a "Probably keep — Personal media" report open on the Videos folder](assets/Screenshots/ss1.png)
+![Drilled several levels deep into a folder via the breadcrumb, showing the treemap's detail at depth](assets/Screenshots/screenshot-drilldown.png)
 
 - **Click** a folder to drill into it — the view zooms in, growing out of the
   cell you clicked.
