@@ -4,6 +4,31 @@ All notable changes to StorageSifter are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com), and the project uses
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Active swap files are recognized.** A swap file (from `/proc/swaps`) is now
+  identified as *"Don't delete — active swap file"* instead of an "unrecognized
+  file," with the `swapoff` command to disable it safely first.
+- **Elevated delete for items you don't own.** When a delete or trash fails
+  because an item belongs to another user (usually root), StorageSifter now shows
+  a clear dialog instead of a small status message — and offers **Delete as
+  administrator**, which authorizes through your desktop's polkit prompt. A
+  copyable `sudo` command is provided as a fallback.
+
+### Fixed
+
+- **Permission failures are no longer easy to miss.** A failed delete/trash now
+  opens a dialog listing exactly what failed and why, rather than a single gray
+  line in the status bar.
+- **Navigating away from a media file closes it.** Clicking a parent folder in
+  the breadcrumb while a video/audio file is maximized now returns to the map
+  instead of leaving the media view open.
+- **Context-menu titles no longer wrap raggedly.** A long filename in the
+  right-click menu is shown on one clean line with a middle ellipsis (keeping the
+  extension visible), with the full name on hover.
+
 ## [0.3.0] — 2026-06-27
 
 ### Added

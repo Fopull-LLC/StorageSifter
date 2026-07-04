@@ -52,6 +52,9 @@ pub struct StorageSifterApp {
     /// Expected used bytes for the current scan target (a picked disk), enabling
     /// a percentage + ETA on the scanning screen. `None` for path-arg scans.
     scan_target: Option<u64>,
+    /// Files currently in use as swap (from `/proc/swaps`), detected once so the
+    /// assessment never mislabels an active swap file.
+    swaps: Vec<PathBuf>,
 }
 
 /// The maximized in-app media view for a clicked audio/video file.
@@ -109,7 +112,21 @@ enum Dialog {
     Properties(NodeId),
     Assess { id: NodeId, report: Assessment },
     Confirm { ids: Vec<NodeId>, permanent: bool },
+    Result(OpOutcome),
     Settings,
+}
+
+/// A delete/trash batch that had at least one failure, shown as a modal so the
+/// user can't miss it (the old behavior buried it in the status bar).
+struct OpOutcome {
+    permanent: bool,
+    succeeded: usize,
+    freed: u64,
+    failed: Vec<(PathBuf, String)>,
+    /// Paths that failed for lack of permission — offer to retry as admin.
+    denied: Vec<PathBuf>,
+    /// Set if launching the elevated retry itself failed.
+    error: Option<String>,
 }
 
 enum MenuAction {
@@ -141,6 +158,14 @@ enum Confirm {
     Open,
     Cancel,
     Go,
+}
+
+/// Result of showing the failure dialog this frame.
+enum ResultAction {
+    Open,
+    Close,
+    /// Retry the denied items with elevated privileges (polkit).
+    Elevate,
 }
 
 impl StorageSifterApp {
@@ -176,6 +201,7 @@ impl StorageSifterApp {
             palette_msg: None,
             media: None,
             scan_target: None,
+            swaps: assess::active_swap_files(),
         }
     }
 
@@ -382,6 +408,8 @@ impl StorageSifterApp {
             });
             self.current = target;
             self.hovered = None;
+            // Navigating away from a maximized media file closes its view.
+            self.media = None;
         }
     }
 
@@ -851,7 +879,7 @@ impl StorageSifterApp {
                 Some(MenuAction::Assess(id)) => {
                     // Computed once, here — the report is then cached in the
                     // dialog and never recomputed per frame.
-                    let report = assess::assess(tree, id, &self.home, &self.pkgs);
+                    let report = assess::assess(tree, id, &self.home, &self.pkgs, &self.swaps);
                     self.dialog = Dialog::Assess { id, report };
                 }
                 Some(MenuAction::Properties(id)) => self.dialog = Dialog::Properties(id),
@@ -906,6 +934,23 @@ impl StorageSifterApp {
                 Confirm::Open => self.dialog = Dialog::Confirm { ids, permanent },
                 Confirm::Cancel => {}
                 Confirm::Go => self.execute_delete(ids, permanent),
+            },
+            Dialog::Result(mut outcome) => match self.show_result(ctx, &outcome) {
+                ResultAction::Open => self.dialog = Dialog::Result(outcome),
+                ResultAction::Close => {}
+                ResultAction::Elevate => match ops::spawn_elevated_delete(&outcome.denied) {
+                    Ok(()) => {
+                        self.status = Some(
+                            "Authorizing as administrator… approve the system prompt, then Rescan."
+                                .to_owned(),
+                        );
+                    }
+                    // Keep the dialog open and show why elevation couldn't start.
+                    Err(e) => {
+                        outcome.error = Some(e);
+                        self.dialog = Dialog::Result(outcome);
+                    }
+                },
             },
             Dialog::Settings => {
                 if self.show_settings(ctx) {
@@ -1179,6 +1224,117 @@ impl StorageSifterApp {
         result
     }
 
+    /// The failure modal shown when a delete/trash batch couldn't remove
+    /// everything — with a clear reason per item and, for permission failures,
+    /// an option to retry with elevated privileges.
+    fn show_result(&self, ctx: &egui::Context, outcome: &OpOutcome) -> ResultAction {
+        let mut action = ResultAction::Open;
+        let response = egui::Modal::new(egui::Id::new("op_result")).show(ctx, |ui| {
+            ui.set_width(540.0);
+            let verb = if outcome.permanent {
+                "delete"
+            } else {
+                "move to Trash"
+            };
+            ui.heading(
+                egui::RichText::new(format!("Couldn't {verb} {} item(s)", outcome.failed.len()))
+                    .color(theme::danger()),
+            );
+            ui.add_space(4.0);
+            if outcome.succeeded > 0 {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} item(s) removed · {} freed.",
+                        outcome.succeeded,
+                        format_size(outcome.freed)
+                    ))
+                    .color(theme::text_dim()),
+                );
+                ui.add_space(4.0);
+            }
+            egui::ScrollArea::vertical()
+                .max_height(150.0)
+                .show(ui, |ui| {
+                    for (path, reason) in outcome.failed.iter().take(20) {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.monospace(path.display().to_string());
+                            ui.label(
+                                egui::RichText::new(format!("— {reason}")).color(theme::danger()),
+                            );
+                        });
+                    }
+                    if outcome.failed.len() > 20 {
+                        ui.label(format!("… and {} more", outcome.failed.len() - 20));
+                    }
+                });
+
+            // Permission failures: explain and offer to elevate.
+            if !outcome.denied.is_empty() {
+                ui.add_space(10.0);
+                ui.label(egui::RichText::new(
+                    "These items are owned by another user (usually root), so StorageSifter — which runs as you — can't remove them.",
+                ).color(theme::text()));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let btn = egui::Button::new(
+                        egui::RichText::new("Delete as administrator").color(egui::Color32::WHITE),
+                    )
+                    .fill(theme::danger());
+                    if ui.add(btn).clicked() {
+                        action = ResultAction::Elevate;
+                    }
+                    ui.label(
+                        egui::RichText::new("Prompts for your password · deletes permanently")
+                            .color(theme::text_dim())
+                            .small(),
+                    );
+                });
+                let cmd = ops::sudo_delete_command(&outcome.denied);
+                ui.add_space(6.0);
+                egui::Frame::new()
+                    .fill(theme::bg())
+                    .inner_margin(egui::Margin::symmetric(8, 6))
+                    .corner_radius(4)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&cmd).monospace().color(theme::text()),
+                                )
+                                .wrap(),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.small_button("Copy").clicked() {
+                                        ui.ctx().copy_text(cmd.clone());
+                                    }
+                                },
+                            );
+                        });
+                    });
+                if let Some(err) = &outcome.error {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(err).color(theme::danger()));
+                }
+            }
+
+            ui.add_space(12.0);
+            ui.separator();
+            ui.add_space(6.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Close").clicked() {
+                    action = ResultAction::Close;
+                }
+            });
+        });
+        if response.should_close() && matches!(action, ResultAction::Open) {
+            action = ResultAction::Close;
+        }
+        action
+    }
+
     fn execute_delete(&mut self, ids: Vec<NodeId>, permanent: bool) {
         let Some(Scan::Done { tree, .. }) = &mut self.scan else {
             return;
@@ -1223,6 +1379,18 @@ impl StorageSifterApp {
 
         self.status = Some(report.summary());
         self.selection.clear();
+
+        // Any failure gets a modal — a lone gray status line was easy to miss.
+        if !report.failed.is_empty() {
+            self.dialog = Dialog::Result(OpOutcome {
+                permanent,
+                succeeded: report.succeeded.len(),
+                freed: report.freed,
+                failed: report.failed,
+                denied: report.denied,
+                error: None,
+            });
+        }
     }
 
     /// The settings modal: rebindable keys plus behavior toggles. Returns
@@ -1740,6 +1908,55 @@ fn disk_row(ui: &mut egui::Ui, disk: &DiskInfo) -> egui::Response {
 }
 
 /// Build the right-click context menu; returns the action chosen, if any.
+/// Render a filename as the header of the context menu: a single, cleanly
+/// middle-elided line (so the extension stays visible) with the full name on
+/// hover. Long filenames are one unbroken "word", and letting egui wrap one in
+/// the narrow menu produced ragged, gap-ridden text — eliding avoids that.
+fn menu_title(ui: &mut egui::Ui, name: &str) {
+    const MAX_W: f32 = 320.0;
+    ui.set_max_width(MAX_W);
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let width = |ui: &egui::Ui, s: &str| {
+        ui.painter()
+            .layout_no_wrap(s.to_owned(), font.clone(), egui::Color32::WHITE)
+            .rect
+            .width()
+    };
+    let shown = if width(ui, name) <= MAX_W {
+        name.to_owned()
+    } else {
+        middle_elide(name, |s| width(ui, s), MAX_W)
+    };
+    let resp = ui.add(
+        egui::Label::new(egui::RichText::new(&shown).strong())
+            .truncate()
+            .selectable(false),
+    );
+    if shown != name {
+        resp.on_hover_text(name);
+    }
+}
+
+/// Shorten `s` with a middle ellipsis until it measures at most `max` wide,
+/// keeping a bit more of the head than the tail. `width` measures a candidate.
+fn middle_elide(s: &str, mut width: impl FnMut(&str) -> f32, max: f32) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let n = chars.len();
+    // Grow the cut (chars replaced by "…") until what remains fits.
+    for cut in 1..n {
+        let keep = n - cut;
+        let head = keep.div_ceil(2);
+        let tail = keep - head;
+        let mut candidate: String = chars[..head].iter().collect();
+        candidate.push('…');
+        candidate.extend(&chars[n - tail..]);
+        if width(&candidate) <= max {
+            return candidate;
+        }
+    }
+    "…".to_owned()
+}
+
 fn context_menu_items(
     ui: &mut egui::Ui,
     tree: &Tree,
@@ -1755,7 +1972,7 @@ fn context_menu_items(
     let n = ids.len();
 
     let mut action = None;
-    ui.label(egui::RichText::new(tree.name(target)).strong());
+    menu_title(ui, tree.name(target));
     ui.separator();
     if ui
         .button(egui::RichText::new("Safe to delete?").color(theme::mount()))
@@ -1928,5 +2145,34 @@ fn segment_label(tree: &Tree, id: NodeId) -> String {
             .unwrap_or_else(|| path.display().to_string())
     } else {
         tree.name(id).to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A deterministic width metric (one unit per character) so we can test the
+    // elision geometry without a real font.
+    fn char_width(s: &str) -> f32 {
+        s.chars().count() as f32
+    }
+
+    #[test]
+    fn middle_elide_keeps_head_and_tail_around_an_ellipsis() {
+        let long = "proton-pass-cli-debug-2.2.1-1-x86_64.pkg.tar.zst";
+        let out = middle_elide(long, char_width, 20.0);
+        assert!(out.chars().count() as f32 <= 20.0);
+        assert!(out.contains('…'));
+        // The start and the extension both survive — that's the whole point.
+        assert!(out.starts_with("proton"));
+        assert!(out.ends_with(".zst"));
+    }
+
+    #[test]
+    fn middle_elide_is_exact_for_a_known_case() {
+        // 20 chars, budget 10 → keep 9 + ellipsis, head biased larger (5 vs 4).
+        let out = middle_elide("abcdefghijklmnopqrst", char_width, 10.0);
+        assert_eq!(out, "abcde…qrst");
     }
 }

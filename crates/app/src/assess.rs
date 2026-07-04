@@ -6,7 +6,7 @@
 //! network, no recursion beyond one level of children — so it's effectively
 //! instant and is computed once when the report opens, never per frame.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use eframe::egui::Color32;
 use scanner::safety::{classify, Class};
@@ -682,7 +682,64 @@ const PROJECT_MARKERS: &[&str] = &[
 /// Analyze whether `id` is safe to delete. Pure, in-memory, bounded. `pkgs` is
 /// the once-detected list of system package managers (see
 /// [`detect_package_managers`]) used to tailor system-cache cleanup advice.
-pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Assessment {
+/// Absolute paths of files currently in use as swap, read from `/proc/swaps`.
+/// Detected once at startup and handed to [`assess`] so an active swap file is
+/// never mistaken for an "unrecognized file." Swap *partitions* are block
+/// devices that never appear in a filesystem scan, so only file-type entries are
+/// returned. Empty if `/proc/swaps` can't be read.
+pub fn active_swap_files() -> Vec<PathBuf> {
+    std::fs::read_to_string("/proc/swaps")
+        .map(|c| parse_swaps(&c))
+        .unwrap_or_default()
+}
+
+/// Parse the body of `/proc/swaps`, keeping file-type entries and decoding the
+/// kernel's octal path escapes.
+fn parse_swaps(contents: &str) -> Vec<PathBuf> {
+    contents
+        .lines()
+        .skip(1) // header: "Filename  Type  Size  Used  Priority"
+        .filter_map(|line| {
+            let mut cols = line.split_whitespace();
+            let name = cols.next()?;
+            let kind = cols.next()?;
+            (kind == "file").then(|| PathBuf::from(unescape_proc(name)))
+        })
+        .collect()
+}
+
+/// Decode the `\NNN` octal escapes the kernel writes for special characters in
+/// `/proc` paths (notably `\040` for a space in a swap file's path).
+fn unescape_proc(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 4 <= bytes.len() {
+            let d = &bytes[i + 1..i + 4];
+            if d.iter().all(|b| (b'0'..=b'7').contains(b)) {
+                let code =
+                    (d[0] - b'0') as u32 * 64 + (d[1] - b'0') as u32 * 8 + (d[2] - b'0') as u32;
+                if let Some(c) = char::from_u32(code) {
+                    out.push(c);
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+pub fn assess(
+    tree: &Tree,
+    id: NodeId,
+    home: &Path,
+    pkgs: &[PkgManager],
+    swaps: &[PathBuf],
+) -> Assessment {
     let node = tree.node(id);
     let path = tree.path(id);
     // Use the path's basename, not the raw node name: the scanner stores the
@@ -726,6 +783,19 @@ pub fn assess(tree: &Tree, id: NodeId, home: &Path, pkgs: &[PkgManager]) -> Asse
             "Deleting this could lock you out of servers, encrypted data, or accounts. Keep it.",
             points,
         );
+    }
+    // --- Active swap: a big, extension-less file that would otherwise look
+    // "unrecognized." Deleting one the kernel is using can hang or crash the box.
+    if !is_dir && swaps.contains(&path) {
+        points.push(Point::bad("Currently in use as system swap"));
+        let mut report = finish(
+            Verdict::Danger,
+            "Active swap file",
+            "This file is in use as swap — extra virtual memory the kernel is actively using. Deleting it while it's active can hang or crash your system and lose data. To reclaim the space safely, turn it off first with the command below, remove its entry from /etc/fstab, and only then delete it.",
+            points,
+        );
+        report.command = Some(format!("sudo swapoff {}", path.display()));
+        return report;
     }
 
     // --- Knowledge catalog: a recognized tool/cache/data directory. This is
@@ -1113,7 +1183,7 @@ mod tests {
         make(dir.path());
         let tree = scan(dir.path()).unwrap();
         let id = child(&tree, name);
-        assess(&tree, id, Path::new(NOWHERE), &[]).verdict
+        assess(&tree, id, Path::new(NOWHERE), &[], &[]).verdict
     }
 
     #[test]
@@ -1181,6 +1251,49 @@ mod tests {
         assert_eq!(v, Verdict::Caution);
     }
 
+    #[test]
+    fn active_swap_file_is_dont_delete() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("swapfile"), vec![0u8; 4096]).unwrap();
+        let tree = scan(dir.path()).unwrap();
+        let id = child(&tree, "swapfile");
+        // Mark this exact file as active swap.
+        let swaps = vec![tree.path(id)];
+        let a = assess(&tree, id, Path::new(NOWHERE), &[], &swaps);
+        assert_eq!(a.verdict, Verdict::Danger);
+        assert_eq!(a.headline, "Active swap file");
+        assert!(a.command.as_deref().unwrap().starts_with("sudo swapoff"));
+    }
+
+    #[test]
+    fn non_swap_file_of_same_name_is_not_flagged() {
+        // A file literally named "swapfile" that isn't in the active list must
+        // not be treated as swap.
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("swapfile"), vec![0u8; 4096]).unwrap();
+        let tree = scan(dir.path()).unwrap();
+        let id = child(&tree, "swapfile");
+        let a = assess(&tree, id, Path::new(NOWHERE), &[], &[]);
+        assert_ne!(a.headline, "Active swap file");
+    }
+
+    #[test]
+    fn parse_swaps_keeps_files_and_decodes_escapes() {
+        let sample = "Filename\tType\tSize\tUsed\tPriority\n\
+                      /swapfile\tfile\t8388604\t0\t-2\n\
+                      /dev/sda2\tpartition\t2000000\t0\t-3\n\
+                      /swap\\040dir/swapfile\tfile\t100\t0\t-4\n";
+        let got = parse_swaps(sample);
+        assert_eq!(
+            got,
+            vec![
+                PathBuf::from("/swapfile"),
+                PathBuf::from("/swap dir/swapfile"),
+            ],
+            "partitions are dropped and \\040 becomes a space"
+        );
+    }
+
     // The first tree node whose path ends with `suffix` (so we can target a
     // nested directory, not just a direct child of the scan root).
     fn find(tree: &Tree, suffix: &str) -> NodeId {
@@ -1194,7 +1307,7 @@ mod tests {
         make(dir.path());
         let tree = scan(dir.path()).unwrap();
         let id = find(&tree, suffix);
-        assess(&tree, id, Path::new(NOWHERE), &[])
+        assess(&tree, id, Path::new(NOWHERE), &[], &[])
     }
 
     #[test]
