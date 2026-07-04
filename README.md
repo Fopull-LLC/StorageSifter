@@ -5,7 +5,8 @@ A fast, lightweight disk-usage visualizer for Linux. It maps a filesystem as a
 consume — so the biggest space hogs are obvious at a glance. Think SpaceSniffer,
 but native, GPU-accelerated, and built for a single Linux machine.
 
-A free and open-source project by **[Fopull LLC](https://fopull.com)**.
+A free and open-source project by **[Fopull LLC](https://fopull.com)** —
+project page at **[fopull.com/storage-sifter](https://fopull.com/storage-sifter)**.
 
 ![StorageSifter showing a squarified treemap of a large directory — every file sized by what it uses on disk, colored by what it is](assets/Screenshots/screenshot-treemap.png)
 
@@ -14,10 +15,42 @@ audio is flagged *"Probably keep — personal media."*
 
 ![A "Safe to delete?" report open over a treemap, identifying a file as personal media and advising you keep it](assets/Screenshots/screenshot-safe-to-delete.png)
 
-> **v0.1.0 — first public release.** A complete, daily-usable disk visualizer:
-> scanning engine, squarified treemap (drill-down, breadcrumb, animated zoom), a
-> device picker, file operations (multi-select, move to trash, permanent delete)
-> behind safety guardrails, and "Safe to delete?" cleanup reports.
+## Features
+
+- **Squarified treemap, GPU-rendered.** Every file and folder is a rectangle
+  sized by real on-disk usage and colored by what it is, so the space hogs pop
+  out instantly. Click to drill in with an animated zoom; a breadcrumb tracks
+  where you are.
+- **"Safe to delete?" reports.** Right-click anything for an instant verdict —
+  *Safe to delete* → *Don't delete* — that names what a path actually is (cache,
+  build output, personal media, a code project, credentials, installed
+  software…) and explains why. A built-in knowledge catalog recognizes dozens of
+  common tool directories and, when there's a cleaner way to reclaim the space
+  than a plain delete, shows the exact **recommended command** to run — with
+  one-click copy.
+- **Package-manager-aware cleanup.** For system-managed caches it detects your
+  distro's package manager (pacman, apt, dnf, zypper, apk, xbps, portage, or
+  nix) and gives the matching clean command, so the advice is right wherever you
+  run it.
+- **In-app audio playback.** Click an audio file and the cell maximizes into a
+  player with play/pause and a scrubbable timeline, so you can listen before
+  deciding to delete. (Video opens in your default player for now.)
+- **Make it yours.** Customizable color palettes with presets and per-color
+  pickers, shareable `SSP1-…` palette codes, adjustable UI/text size, animation
+  speed, folder-preview depth, and a tweakable hover drill-target highlight —
+  all persisted and applied live.
+- **Informative scanning screen.** Live progress while it scans: items and size
+  found, elapsed time, and scan rate — and, for a whole-disk scan, a percentage
+  bar with the expected total and an estimated time remaining.
+- **Byte-exact with `du`.** Sizes use real on-disk block counts, de-duplicate
+  hard links, and stay on one filesystem, so the numbers answer *"how much will
+  I actually reclaim?"*
+- **Safety first.** Move-to-trash by default (reversible), tiered confirmation
+  for permanent or out-of-home deletes, and protected system roots refused
+  outright.
+
+> **Latest release: v0.3.0.** See the [changelog](CHANGELOG.md) for what landed
+> in each version.
 
 ## Install
 
@@ -190,8 +223,10 @@ archives pink. One level of nested preview is drawn inside each folder.
 - **Keyboard**: `Delete` trashes the selection, `Shift+Delete` deletes it
   permanently, `Ctrl+A` selects everything in view, `Esc` clears the selection,
   `Backspace` goes up, `F5` rescans. All bindings are **configurable in ⚙
-  Settings** (which also toggles zoom animations and the folder preview depth);
-  settings persist to `~/.config/storagesifter/settings.json`.
+  Settings**, which also controls the color palette (presets, per-color pickers,
+  and shareable `SSP1-…` codes), UI/text size, animation speed, folder-preview
+  depth, and the hover drill-target highlight. Settings persist to
+  `~/.config/storagesifter/settings.json` and apply live.
 
 The first build pulls in the GUI stack and takes a few minutes; after that,
 rebuilds of the app are seconds. A `--release` build is available for maximum
@@ -236,7 +271,9 @@ X11) — plus any terminal output if it failed to launch.
 ## About
 
 StorageSifter is a free and open-source product of **Fopull LLC** — a software
-studio by Ty Johnston. More projects at **[fopull.com](https://fopull.com)**.
+studio by Ty Johnston. Project page:
+**[fopull.com/storage-sifter](https://fopull.com/storage-sifter)**. More projects
+at **[fopull.com](https://fopull.com)**.
 
 ## License
 
