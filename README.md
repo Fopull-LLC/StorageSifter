@@ -70,9 +70,11 @@ chmod +x StorageSifter-*-x86_64.AppImage
 
 ### Arch / CachyOS — AUR
 
-> **Coming soon.** The AUR packages are prepared (see [`packaging/aur/`](packaging/aur))
-> and will be published shortly. For now, use the AppImage above. Once they're
-> live, install with:
+Live on the AUR:
+[`storagesifter-bin`](https://aur.archlinux.org/packages/storagesifter-bin)
+(the official release binary) and
+[`storagesifter`](https://aur.archlinux.org/packages/storagesifter) (builds
+from source).
 
 ```sh
 yay -S storagesifter-bin     # prebuilt binary, fast
