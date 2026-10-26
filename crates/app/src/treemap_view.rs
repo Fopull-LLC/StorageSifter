@@ -330,14 +330,14 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
     ctx.painter.rect_stroke(
         drawn,
         0,
-        Stroke::new(1.0, ctx.pal.border.gamma_multiply(ctx.alpha)),
+        Stroke::new(1.0_f32, ctx.pal.border.gamma_multiply(ctx.alpha)),
         StrokeKind::Inside,
     );
     if node.is_mountpoint() {
         ctx.painter.rect_stroke(
             drawn,
             0,
-            Stroke::new(2.5, ctx.pal.mount.gamma_multiply(ctx.alpha)),
+            Stroke::new(2.5_f32, ctx.pal.mount.gamma_multiply(ctx.alpha)),
             StrokeKind::Inside,
         );
     }
@@ -347,7 +347,7 @@ fn draw_cell(ctx: &Paint, id: NodeId, layout: Rect, nest: u32, hovered: &mut Opt
         ctx.painter.rect_stroke(
             drawn,
             0,
-            Stroke::new(2.0, ctx.pal.accent.gamma_multiply(ctx.alpha)),
+            Stroke::new(2.0_f32, ctx.pal.accent.gamma_multiply(ctx.alpha)),
             StrokeKind::Inside,
         );
     }

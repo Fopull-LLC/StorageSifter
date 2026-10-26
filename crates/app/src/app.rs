@@ -9,12 +9,14 @@ use scanner::safety::{classify, Class};
 use scanner::{NodeId, NodeKind, Tree};
 
 use crate::assess::{self, Assessment};
+use crate::install_ping;
 use crate::ops;
 use crate::player::{self, AudioPlayer, MediaKind};
 use crate::scan::Scan;
 use crate::settings::{Action, Keybind, SavedPalette, Settings};
 use crate::theme::{self, format_size};
 use crate::treemap_view;
+use crate::update::{self, Updater};
 
 pub struct StorageSifterApp {
     disks: Vec<DiskInfo>,
@@ -55,6 +57,16 @@ pub struct StorageSifterApp {
     /// Files currently in use as swap (from `/proc/swaps`), detected once so the
     /// assessment never mislabels an active swap file.
     swaps: Vec<PathBuf>,
+    /// Update checks and in-place updates (GitHub releases).
+    updater: Updater,
+    /// The user hid the update banner for this session.
+    update_dismissed: bool,
+    /// "Update now" was clicked, so a failure is shown in the banner.
+    update_attempted: bool,
+    /// Why relaunching into the new version failed, if it did.
+    update_msg: Option<String>,
+    /// Show the one-time install-ping notice this session.
+    ping_notice: bool,
 }
 
 /// The maximized in-app media view for a clicked audio/video file.
@@ -169,13 +181,32 @@ enum ResultAction {
 }
 
 impl StorageSifterApp {
-    pub fn new(path: Option<PathBuf>) -> Self {
+    pub fn new(path: Option<PathBuf>, ctx: egui::Context) -> Self {
         let (scan, path) = match path {
             Some(p) => (Some(Scan::start(&p)), p),
             None => (None, PathBuf::new()),
         };
-        let settings = Settings::load();
+        let mut settings = Settings::load();
         theme::set_palette(settings.palette);
+
+        // Install ping: nothing is sent on the launch that shows the notice,
+        // so the user can opt out before a single request goes out.
+        let ping_on = settings.install_ping && !install_ping::disabled_by_env();
+        if !settings.install_ping {
+            install_ping::forget();
+        }
+        let ping_notice = ping_on && !settings.ping_notice_seen;
+        if ping_notice {
+            settings.ping_notice_seen = true;
+            settings.save();
+        } else if ping_on {
+            install_ping::spawn();
+        }
+
+        let updater = Updater::new(ctx);
+        if settings.check_updates {
+            updater.check();
+        }
         Self {
             disks: list_disks(),
             scan,
@@ -202,6 +233,11 @@ impl StorageSifterApp {
             media: None,
             scan_target: None,
             swaps: assess::active_swap_files(),
+            updater,
+            update_dismissed: false,
+            update_attempted: false,
+            update_msg: None,
+            ping_notice,
         }
     }
 
@@ -229,6 +265,7 @@ impl eframe::App for StorageSifterApp {
             ui.ctx().set_zoom_factor(self.settings.ui_scale);
         }
 
+        self.banners(ui);
         if self.scan.is_none() {
             self.device_picker(ui);
             return;
@@ -272,6 +309,112 @@ impl eframe::App for StorageSifterApp {
 }
 
 impl StorageSifterApp {
+    /// The strip above everything else: an available update, and the one-time
+    /// install-ping notice.
+    fn banners(&mut self, ui: &mut egui::Ui) {
+        let state = self.updater.state();
+        let show_update = !self.update_dismissed
+            && match state {
+                update::State::Available(_)
+                | update::State::Installing(_)
+                | update::State::Installed(_) => true,
+                // A failed startup check stays quiet; a failed install doesn't.
+                update::State::Failed(_) => self.update_attempted,
+                _ => false,
+            };
+        if !show_update && !self.ping_notice {
+            return;
+        }
+        egui::Panel::top("banners").show_inside(ui, |ui| {
+            ui.add_space(3.0);
+            if show_update {
+                self.update_banner(ui, state);
+            }
+            if self.ping_notice {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(
+                            "StorageSifter counts installs with one anonymous ping a day \
+                             (a random install ID, the app version, OS and CPU type). \
+                             You can turn it off in Settings.",
+                        )
+                        .color(theme::text_dim()),
+                    );
+                    ui.hyperlink_to("What is sent", install_ping::PRIVACY_URL);
+                    if ui.small_button("Got it").clicked() {
+                        self.ping_notice = false;
+                    }
+                });
+            }
+            ui.add_space(3.0);
+        });
+    }
+
+    fn update_banner(&mut self, ui: &mut egui::Ui, state: update::State) {
+        ui.horizontal_wrapped(|ui| match state {
+            update::State::Available(release) => {
+                ui.label(
+                    egui::RichText::new(format!("⬆  StorageSifter {} is available", release.tag))
+                        .color(theme::accent())
+                        .strong(),
+                );
+                ui.label(
+                    egui::RichText::new(format!("(you have v{})", update::CURRENT))
+                        .color(theme::text_dim()),
+                );
+                if self.updater.method.can_self_update() {
+                    if ui.button("Update now").clicked() {
+                        self.update_attempted = true;
+                        self.updater.install();
+                    }
+                } else if let Some(cmd) = self.updater.method.command() {
+                    ui.label("Update with");
+                    ui.monospace(&cmd);
+                    if ui.small_button("Copy").clicked() {
+                        ui.ctx().copy_text(cmd);
+                    }
+                } else {
+                    ui.hyperlink_to("Download", update::RELEASES_URL);
+                }
+                ui.hyperlink_to("What's new", &release.page);
+                if ui.small_button("Later").clicked() {
+                    self.update_dismissed = true;
+                }
+            }
+            update::State::Installing(release) => {
+                ui.spinner();
+                ui.label(format!("Downloading and verifying {}…", release.tag));
+            }
+            update::State::Installed(release) => {
+                ui.label(
+                    egui::RichText::new(format!("✔  {} is installed.", release.tag))
+                        .color(theme::accent())
+                        .strong(),
+                );
+                if ui.button("Restart now").clicked() {
+                    if let Err(e) = self.updater.relaunch(ui.ctx()) {
+                        self.update_msg = Some(e);
+                    }
+                }
+                ui.label(
+                    egui::RichText::new("or keep working; it's used from the next launch")
+                        .color(theme::text_dim()),
+                );
+                if let Some(msg) = &self.update_msg {
+                    ui.label(egui::RichText::new(msg).color(theme::danger()));
+                }
+            }
+            update::State::Failed(e) => {
+                ui.label(egui::RichText::new(format!("Update failed: {e}")).color(theme::danger()));
+                ui.hyperlink_to("Download page", update::RELEASES_URL);
+                if ui.small_button("Dismiss").clicked() {
+                    self.update_dismissed = true;
+                }
+            }
+            _ => {}
+        });
+    }
+
     fn device_picker(&mut self, ui: &mut egui::Ui) {
         let mut chosen = None;
         let mut refresh = false;
@@ -1703,6 +1846,93 @@ impl StorageSifterApp {
                             ui.label(egui::RichText::new(msg).small().color(theme::text_dim()));
                         }
                     });
+                    ui.add_space(12.0);
+
+                    // ---- Updates ----
+                    section_label(ui, "Updates");
+                    let state = self.updater.state();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("StorageSifter v{}", update::CURRENT));
+                        let busy = matches!(
+                            state,
+                            update::State::Checking | update::State::Installing(_)
+                        );
+                        if ui
+                            .add_enabled(!busy, egui::Button::new("Check for updates"))
+                            .clicked()
+                        {
+                            self.update_dismissed = false;
+                            self.updater.check();
+                        }
+                    });
+                    let dim = |ui: &mut egui::Ui, text: String| {
+                        ui.label(egui::RichText::new(text).small().color(theme::text_dim()));
+                    };
+                    match &state {
+                        update::State::Idle => {}
+                        update::State::Checking => {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                dim(ui, "Checking…".to_owned());
+                            });
+                        }
+                        update::State::UpToDate => dim(ui, "You're on the latest version.".into()),
+                        update::State::Available(r) => {
+                            dim(ui, format!("{} is available; see the banner at the top.", r.tag))
+                        }
+                        update::State::Installing(r) => dim(ui, format!("Installing {}…", r.tag)),
+                        update::State::Installed(r) => {
+                            dim(ui, format!("{} is installed; restart to use it.", r.tag))
+                        }
+                        update::State::Failed(e) => {
+                            ui.label(egui::RichText::new(e).small().color(theme::danger()));
+                        }
+                    }
+                    dim(
+                        ui,
+                        match &self.updater.method {
+                            update::Method::AppImage(_) | update::Method::Binary(_) => {
+                                "Updates download from GitHub, are checksum-verified, and install in place.".to_owned()
+                            }
+                            update::Method::Package { pkg, .. } => format!(
+                                "Installed by your package manager ({pkg}), so it updates StorageSifter."
+                            ),
+                            update::Method::Manual => {
+                                "This copy can't update itself; new versions are on the GitHub releases page."
+                                    .to_owned()
+                            }
+                        },
+                    );
+                    ui.checkbox(&mut self.settings.check_updates, "Check for updates at startup");
+                    ui.add_space(12.0);
+
+                    // ---- Privacy ----
+                    section_label(ui, "Privacy");
+                    let env_off = install_ping::disabled_by_env();
+                    let was_on = self.settings.install_ping;
+                    ui.horizontal(|ui| {
+                        ui.add_enabled(
+                            !env_off,
+                            egui::Checkbox::new(
+                                &mut self.settings.install_ping,
+                                "Count this install (anonymous daily ping)",
+                            ),
+                        );
+                        ui.hyperlink_to("What is sent", install_ping::PRIVACY_URL);
+                    });
+                    if was_on && !self.settings.install_ping {
+                        install_ping::forget();
+                    }
+                    dim(
+                        ui,
+                        if env_off {
+                            "Turned off by the FOPULL_NO_PING environment variable.".to_owned()
+                        } else {
+                            "Once a day: a random install ID, the app version, OS and CPU type. \
+                             Turning it off deletes the ID."
+                                .to_owned()
+                        },
+                    );
                 });
 
             ui.add_space(10.0);
@@ -1712,9 +1942,13 @@ impl StorageSifterApp {
                 if ui.button("Reset to defaults").clicked() {
                     // Keep the user's saved palettes — a settings reset shouldn't
                     // throw away color profiles they imported or saved.
+                    // Nor should it silently turn the install ping back on.
                     let saved = std::mem::take(&mut self.settings.saved_palettes);
+                    let (ping, seen) = (self.settings.install_ping, self.settings.ping_notice_seen);
                     self.settings = Settings::default();
                     self.settings.saved_palettes = saved;
+                    self.settings.install_ping = ping;
+                    self.settings.ping_notice_seen = seen;
                     self.capturing = None;
                     theme_dirty = true;
                 }

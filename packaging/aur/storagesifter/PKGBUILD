@@ -6,7 +6,7 @@ pkgdesc="Fast, GPU-accelerated disk-usage treemap visualizer for Linux"
 arch=('x86_64')
 url="https://github.com/Fopull-LLC/StorageSifter"
 license=('MIT')
-depends=('gcc-libs' 'vulkan-icd-loader' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'alsa-lib')
+depends=('gcc-libs' 'vulkan-icd-loader' 'libxkbcommon' 'wayland' 'libx11' 'libxcursor' 'libxi' 'libxrandr' 'alsa-lib' 'curl')
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
 # Run `updpkgsums` before publishing (once the v0.2.0 tag tarball is on GitHub).

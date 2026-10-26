@@ -9,12 +9,14 @@
 
 mod app;
 mod assess;
+mod install_ping;
 mod ops;
 mod player;
 mod scan;
 mod settings;
 mod theme;
 mod treemap_view;
+mod update;
 
 use std::path::PathBuf;
 
@@ -46,7 +48,7 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             // Construct first: the app loads settings and installs the saved
             // palette, so `apply` below themes the very first frame correctly.
-            let app = app::StorageSifterApp::new(path);
+            let app = app::StorageSifterApp::new(path, cc.egui_ctx.clone());
             theme::apply(&cc.egui_ctx);
             Ok(Box::new(app))
         }),

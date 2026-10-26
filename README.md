@@ -117,6 +117,30 @@ You can verify any download against the release's `SHA256SUMS.txt`:
   `./StorageSifter-*.AppImage --appimage-extract-and-run`.
 - The prebuilt binaries target **glibc 2.35+** (built on Ubuntu 22.04); current
   distributions are fine.
+- **curl** (present on virtually every desktop) for update checks and the
+  install count below; StorageSifter works fully offline without it.
+
+## Updating
+
+StorageSifter checks GitHub for a newer release at startup (toggle in
+**Settings ▸ Updates**, which also has a **Check for updates** button). When one
+is out, a banner appears at the top:
+
+- **AppImage, tarball or `cargo install` copies:** click **Update now**. The new
+  build is downloaded, verified against the release's `SHA256SUMS.txt`, and
+  swapped in place; **Restart now** relaunches into it.
+- **AUR / distro packages:** the banner shows the command to run (for example
+  `yay -Syu storagesifter-bin`), since your package manager owns the files.
+
+## Privacy
+
+StorageSifter sends one anonymous ping a day so Fopull can count active
+installs: a random install ID, the app version, the OS and the CPU
+architecture, and nothing else. No file names, paths, scan results, or anything
+that identifies you. Nothing is sent on the first launch, which shows a notice
+first. Turn it off in **Settings ▸ Privacy** (which deletes the ID), or set
+`FOPULL_NO_PING=1` in the environment. Details:
+[fopull.com/privacy#install-ping](https://fopull.com/privacy#install-ping).
 
 ## Architecture
 

@@ -186,6 +186,12 @@ pub struct Settings {
     pub palette: Palette,
     /// User-saved palettes (deletable), shown next to the built-in presets.
     pub saved_palettes: Vec<SavedPalette>,
+    /// Look for a newer release on GitHub at startup.
+    pub check_updates: bool,
+    /// Send the anonymous once-a-day install ping (see `install_ping`).
+    pub install_ping: bool,
+    /// The install-ping notice has been shown; no ping is sent before it has.
+    pub ping_notice_seen: bool,
 }
 
 /// Bounds shared by the slider UI and the load-time clamp.
@@ -209,6 +215,9 @@ impl Default for Settings {
             dither_strength: 0.30,
             palette: Palette::COOL_DARK,
             saved_palettes: Vec::new(),
+            check_updates: true,
+            install_ping: true,
+            ping_notice_seen: false,
         }
     }
 }
@@ -232,11 +241,16 @@ impl Settings {
     }
 }
 
-fn config_path() -> Option<PathBuf> {
+/// StorageSifter's own config directory (`$XDG_CONFIG_HOME/storagesifter`).
+pub fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("storagesifter").join("settings.json"))
+    Some(base.join("storagesifter"))
+}
+
+fn config_path() -> Option<PathBuf> {
+    Some(config_dir()?.join("settings.json"))
 }
 
 impl Settings {

@@ -8,6 +8,18 @@ All notable changes to StorageSifter are documented here. The format follows
 
 ### Added
 
+- **In-app updates.** StorageSifter checks GitHub for a new release at startup
+  (can be turned off) and from **Settings ▸ Updates ▸ Check for updates**. A
+  banner announces a new version; for an AppImage or standalone binary,
+  **Update now** downloads it, verifies its SHA-256 checksum, installs it in
+  place and offers **Restart now**. Package-manager installs (AUR, etc.) get the
+  exact command to run instead.
+- **Anonymous install count.** One ping a day (a random install ID, the app
+  version, OS and CPU architecture) tells Fopull how many installs are active.
+  The first launch shows a notice and sends nothing; it can be turned off in
+  **Settings ▸ Privacy** (which deletes the ID) or with `FOPULL_NO_PING=1`. See
+  [fopull.com/privacy#install-ping](https://fopull.com/privacy#install-ping).
+
 - **Active swap files are recognized.** A swap file (from `/proc/swaps`) is now
   identified as *"Don't delete — active swap file"* instead of an "unrecognized
   file," with the `swapoff` command to disable it safely first.
