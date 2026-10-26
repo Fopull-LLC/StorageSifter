@@ -14,7 +14,7 @@ options=('!strip' '!debug')
 _dir="storagesifter-v${pkgver}-x86_64-linux"
 source=("${_dir}.tar.gz::${url}/releases/download/v${pkgver}/${_dir}.tar.gz")
 # Run `updpkgsums` before publishing (once the v0.2.0 release asset is uploaded).
-sha256sums=('SKIP')
+sha256sums=('fb03561c3067e120a0128c29e66846dcddb4ba47da1f035d727565f81a6b74e9')
 
 package() {
     cd "$_dir"

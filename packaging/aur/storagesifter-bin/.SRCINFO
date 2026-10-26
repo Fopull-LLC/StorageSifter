@@ -20,6 +20,6 @@ pkgbase = storagesifter-bin
 	options = !strip
 	options = !debug
 	source = storagesifter-v0.4.0-x86_64-linux.tar.gz::https://github.com/Fopull-LLC/StorageSifter/releases/download/v0.4.0/storagesifter-v0.4.0-x86_64-linux.tar.gz
-	sha256sums = SKIP
+	sha256sums = fb03561c3067e120a0128c29e66846dcddb4ba47da1f035d727565f81a6b74e9
 
 pkgname = storagesifter-bin

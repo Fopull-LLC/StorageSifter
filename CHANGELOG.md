@@ -21,7 +21,6 @@ All notable changes to StorageSifter are documented here. The format follows
   The first launch shows a notice and sends nothing; it can be turned off in
   **Settings ▸ Privacy** (which deletes the ID) or with `FOPULL_NO_PING=1`. See
   [fopull.com/privacy#install-ping](https://fopull.com/privacy#install-ping).
-
 - **Active swap files are recognized.** A swap file (from `/proc/swaps`) is now
   identified as *"Don't delete — active swap file"* instead of an "unrecognized
   file," with the `swapoff` command to disable it safely first.

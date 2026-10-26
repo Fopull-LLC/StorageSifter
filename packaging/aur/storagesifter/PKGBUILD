@@ -10,7 +10,7 @@ depends=('gcc-libs' 'vulkan-icd-loader' 'libxkbcommon' 'wayland' 'libx11' 'libxc
 makedepends=('cargo')
 source=("$pkgname-$pkgver.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
 # Run `updpkgsums` before publishing (once the v0.2.0 tag tarball is on GitHub).
-sha256sums=('SKIP')
+sha256sums=('31a06c76de1e817112e3c7e892139c2e3b52291022e48881d62190e590c8081a')
 
 prepare() {
     cd "StorageSifter-${pkgver}"

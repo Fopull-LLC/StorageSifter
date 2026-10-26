@@ -17,6 +17,6 @@ pkgbase = storagesifter
 	depends = alsa-lib
 	depends = curl
 	source = storagesifter-0.4.0.tar.gz::https://github.com/Fopull-LLC/StorageSifter/archive/refs/tags/v0.4.0.tar.gz
-	sha256sums = SKIP
+	sha256sums = 31a06c76de1e817112e3c7e892139c2e3b52291022e48881d62190e590c8081a
 
 pkgname = storagesifter
