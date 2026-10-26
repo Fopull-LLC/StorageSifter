@@ -6,6 +6,8 @@ All notable changes to StorageSifter are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-26
+
 ### Added
 
 - **In-app updates.** StorageSifter checks GitHub for a new release at startup
@@ -112,6 +114,7 @@ First public release.
 - Distribution: AppImage, prebuilt binary tarball, AUR packages
   (`storagesifter`, `storagesifter-bin`), and `cargo install`.
 
+[0.4.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Fopull-LLC/StorageSifter/releases/tag/v0.1.0
