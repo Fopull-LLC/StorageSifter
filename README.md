@@ -6,7 +6,7 @@ consume — so the biggest space hogs are obvious at a glance. Think SpaceSniffe
 but native, GPU-accelerated, and built for a single Linux machine.
 
 A free and open-source project by **[Fopull LLC](https://fopull.com)** —
-project page at **[fopull.com/storage-sifter](https://fopull.com/storage-sifter)**.
+project page at **[fopull.com/storage-sifter](https://fopull.com/storage-sifter?utm_source=github&utm_medium=readme)**.
 
 ![StorageSifter showing a squarified treemap of a large directory — every file sized by what it uses on disk, colored by what it is](assets/Screenshots/screenshot-treemap.png)
 
@@ -49,19 +49,25 @@ audio is flagged *"Probably keep — personal media."*
   for permanent or out-of-home deletes, and protected system roots refused
   outright.
 
-> **Latest release: v0.3.0.** See the [changelog](CHANGELOG.md) for what landed
+> **Latest release: v0.4.0.** See the [changelog](CHANGELOG.md) for what landed
 > in each version.
 
 ## Install
 
+**Download StorageSifter from [fopull.com/storage-sifter](https://fopull.com/storage-sifter?utm_source=github&utm_medium=readme#install).**
+That page always has the latest AppImage and tarball, and it is where you can
+support the project if it saves you some space. The same files are also on the
+[GitHub releases page](https://github.com/Fopull-LLC/StorageSifter/releases/latest).
+
 StorageSifter is a single, self-contained binary for **x86-64 Linux**. It needs
 a Vulkan-capable GPU driver (standard on modern desktops) and a Wayland or X11
-session.
+session. Once installed, it updates itself (see [Updating](#updating)).
 
 ### AppImage — any distro
 
-Download `StorageSifter-*-x86_64.AppImage` from the
-[latest release](https://github.com/Fopull-LLC/StorageSifter/releases/latest), then:
+Download `StorageSifter-*-x86_64.AppImage` from
+[fopull.com/storage-sifter](https://fopull.com/storage-sifter?utm_source=github&utm_medium=readme#install) (or the
+[latest GitHub release](https://github.com/Fopull-LLC/StorageSifter/releases/latest)), then:
 
 ```sh
 chmod +x StorageSifter-*-x86_64.AppImage
@@ -84,8 +90,9 @@ yay -S storagesifter
 
 ### Prebuilt binary — tarball
 
-Grab `storagesifter-*-x86_64-linux.tar.gz` from the
-[latest release](https://github.com/Fopull-LLC/StorageSifter/releases/latest),
+Grab `storagesifter-*-x86_64-linux.tar.gz` from
+[fopull.com/storage-sifter](https://fopull.com/storage-sifter?utm_source=github&utm_medium=readme#install) (or the
+[latest GitHub release](https://github.com/Fopull-LLC/StorageSifter/releases/latest)),
 then put the binary on your `PATH`:
 
 ```sh
@@ -298,8 +305,11 @@ X11) — plus any terminal output if it failed to launch.
 
 StorageSifter is a free and open-source product of **Fopull LLC** — a software
 studio by Ty Johnston. Project page:
-**[fopull.com/storage-sifter](https://fopull.com/storage-sifter)**. More projects
-at **[fopull.com](https://fopull.com)**.
+**[fopull.com/storage-sifter](https://fopull.com/storage-sifter?utm_source=github&utm_medium=readme)**. More projects
+at **[fopull.com](https://fopull.com/?utm_source=github&utm_medium=readme)**.
+
+StorageSifter is free. If it has saved you some space, you can
+[support it](https://fopull.com/support?product=storage-sifter&utm_source=github&utm_medium=readme).
 
 ## License
 
