@@ -10,6 +10,7 @@
 mod app;
 mod assess;
 mod install_ping;
+mod links;
 mod ops;
 mod player;
 mod scan;
