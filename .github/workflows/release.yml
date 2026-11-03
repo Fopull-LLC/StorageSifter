@@ -1,3 +1,4 @@
+
 name: Release
 
 # Cut a release by pushing a version tag:
@@ -74,6 +75,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          # Somebody who lands on a release page from a search is pointed at
+          # the project page, which has the files and the support step.
+          body: |
+            **Download:** [fopull.com/storage-sifter](https://fopull.com/storage-sifter?utm_source=github&utm_medium=release-notes#install) (or the files below). Already installed? StorageSifter updates itself.
           generate_release_notes: true
           files: |
             dist/*.tar.gz
