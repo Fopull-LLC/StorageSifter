@@ -1,6 +1,6 @@
 pkgbase = storagesifter
 	pkgdesc = Fast, GPU-accelerated disk-usage treemap visualizer for Linux
-	pkgver = 0.4.0
+	pkgver = 0.4.1
 	pkgrel = 1
 	url = https://github.com/Fopull-LLC/StorageSifter
 	arch = x86_64
@@ -16,7 +16,7 @@ pkgbase = storagesifter
 	depends = libxrandr
 	depends = alsa-lib
 	depends = curl
-	source = storagesifter-0.4.0.tar.gz::https://github.com/Fopull-LLC/StorageSifter/archive/refs/tags/v0.4.0.tar.gz
+	source = storagesifter-0.4.1.tar.gz::https://github.com/Fopull-LLC/StorageSifter/archive/refs/tags/v0.4.1.tar.gz
 	sha256sums = 31a06c76de1e817112e3c7e892139c2e3b52291022e48881d62190e590c8081a
 
 pkgname = storagesifter

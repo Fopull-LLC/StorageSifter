@@ -49,7 +49,7 @@ audio is flagged *"Probably keep — personal media."*
   for permanent or out-of-home deletes, and protected system roots refused
   outright.
 
-> **Latest release: v0.4.0.** See the [changelog](CHANGELOG.md) for what landed
+> **Latest release: v0.4.1.** See the [changelog](CHANGELOG.md) for what landed
 > in each version.
 
 ## Install
