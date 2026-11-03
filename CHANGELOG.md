@@ -6,6 +6,22 @@ All notable changes to StorageSifter are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Support StorageSifter.** A link beside fopull.com on the device screen and
+  a new **Settings ▸ About** section (project page, support, report a bug).
+- **A short note on the first launch after an update:** "Updated to vX",
+  What's new, and a line about supporting the project. It shows at most once
+  every 30 days, never on a fresh install, and closes with **Got it**. Nothing
+  is sent to decide when it shows.
+
+### Changed
+
+- A copy that cannot update itself now links to the download page on
+  fopull.com rather than the GitHub releases page.
+- Links to fopull.com carry a campaign tag naming where in the app they were
+  clicked, so Fopull can see which ones people use.
+
 ## [0.4.0] — 2026-10-26
 
 ### Added

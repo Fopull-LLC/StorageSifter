@@ -10,6 +10,7 @@ use scanner::{NodeId, NodeKind, Tree};
 
 use crate::assess::{self, Assessment};
 use crate::install_ping;
+use crate::links;
 use crate::ops;
 use crate::player::{self, AudioPlayer, MediaKind};
 use crate::scan::Scan;
@@ -67,6 +68,9 @@ pub struct StorageSifterApp {
     update_msg: Option<String>,
     /// Show the one-time install-ping notice this session.
     ping_notice: bool,
+    /// First launch after an update (at most once a month): a short note with
+    /// What's new and the support link.
+    updated_note: bool,
 }
 
 /// The maximized in-app media view for a clicked audio/video file.
@@ -186,8 +190,28 @@ impl StorageSifterApp {
             Some(p) => (Some(Scan::start(&p)), p),
             None => (None, PathBuf::new()),
         };
+        let existing = Settings::saved_before();
         let mut settings = Settings::load();
         theme::set_palette(settings.palette);
+
+        // First launch after an update: one quiet note, at most once a month.
+        // A copy upgraded from before this setting existed has a settings file
+        // but no recorded version, so it counts as updated from "earlier".
+        let previous = if settings.last_version.is_empty() && existing {
+            "earlier".to_owned()
+        } else {
+            settings.last_version.clone()
+        };
+        let today = links::today();
+        let updated_note =
+            links::support_line_due(&previous, update::CURRENT, settings.support_line_day, today);
+        if settings.last_version != update::CURRENT || updated_note {
+            settings.last_version = update::CURRENT.to_owned();
+            if updated_note {
+                settings.support_line_day = today;
+            }
+            settings.save();
+        }
 
         // Install ping: nothing is sent on the launch that shows the notice,
         // so the user can opt out before a single request goes out.
@@ -238,6 +262,7 @@ impl StorageSifterApp {
             update_attempted: false,
             update_msg: None,
             ping_notice,
+            updated_note,
         }
     }
 
@@ -322,13 +347,39 @@ impl StorageSifterApp {
                 update::State::Failed(_) => self.update_attempted,
                 _ => false,
             };
-        if !show_update && !self.ping_notice {
+        if !show_update && !self.ping_notice && !self.updated_note {
             return;
         }
         egui::Panel::top("banners").show_inside(ui, |ui| {
             ui.add_space(3.0);
             if show_update {
                 self.update_banner(ui, state);
+            }
+            if self.updated_note && !show_update {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("✔  Updated to v{}", update::CURRENT))
+                            .color(theme::accent())
+                            .strong(),
+                    );
+                    ui.hyperlink_to(
+                        "What's new",
+                        format!(
+                            "https://github.com/Fopull-LLC/StorageSifter/releases/tag/v{}",
+                            update::CURRENT
+                        ),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "·  StorageSifter is free. If it has saved you some space,",
+                        )
+                        .color(theme::text_dim()),
+                    );
+                    ui.hyperlink_to("you can support it", links::support("updated-note"));
+                    if ui.small_button("Got it").clicked() {
+                        self.updated_note = false;
+                    }
+                });
             }
             if self.ping_notice {
                 ui.horizontal_wrapped(|ui| {
@@ -374,7 +425,7 @@ impl StorageSifterApp {
                         ui.ctx().copy_text(cmd);
                     }
                 } else {
-                    ui.hyperlink_to("Download", update::RELEASES_URL);
+                    ui.hyperlink_to("Download", links::project("update-banner"));
                 }
                 ui.hyperlink_to("What's new", &release.page);
                 if ui.small_button("Later").clicked() {
@@ -406,7 +457,7 @@ impl StorageSifterApp {
             }
             update::State::Failed(e) => {
                 ui.label(egui::RichText::new(format!("Update failed: {e}")).color(theme::danger()));
-                ui.hyperlink_to("Download page", update::RELEASES_URL);
+                ui.hyperlink_to("Download page", links::project("update-failed"));
                 if ui.small_button("Dismiss").clicked() {
                     self.update_dismissed = true;
                 }
@@ -449,7 +500,9 @@ impl StorageSifterApp {
                     ui.label(
                         egui::RichText::new("A Fopull LLC project  ·").color(theme::text_dim()),
                     );
-                    ui.hyperlink_to("fopull.com", "https://fopull.com");
+                    ui.hyperlink_to("fopull.com", links::home("device-picker"));
+                    ui.label(egui::RichText::new("·").color(theme::text_dim()));
+                    ui.hyperlink_to("Support StorageSifter", links::support("device-picker"));
                 });
             });
         });
@@ -1898,7 +1951,7 @@ impl StorageSifterApp {
                                 "Installed by your package manager ({pkg}), so it updates StorageSifter."
                             ),
                             update::Method::Manual => {
-                                "This copy can't update itself; new versions are on the GitHub releases page."
+                                "This copy can't update itself; download new versions from fopull.com/storage-sifter."
                                     .to_owned()
                             }
                         },
@@ -1933,6 +1986,21 @@ impl StorageSifterApp {
                                 .to_owned()
                         },
                     );
+                    ui.add_space(12.0);
+
+                    // ---- About ----
+                    section_label(ui, "About");
+                    dim(
+                        ui,
+                        "StorageSifter is free and open source, made by Fopull LLC.".to_owned(),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.hyperlink_to("Project page", links::project("settings"));
+                        ui.label(egui::RichText::new("·").color(theme::text_dim()));
+                        ui.hyperlink_to("Support StorageSifter", links::support("settings"));
+                        ui.label(egui::RichText::new("·").color(theme::text_dim()));
+                        ui.hyperlink_to("Report a bug", links::ISSUES);
+                    });
                 });
 
             ui.add_space(10.0);
@@ -1945,7 +2013,13 @@ impl StorageSifterApp {
                     // Nor should it silently turn the install ping back on.
                     let saved = std::mem::take(&mut self.settings.saved_palettes);
                     let (ping, seen) = (self.settings.install_ping, self.settings.ping_notice_seen);
+                    let (version, note_day) = (
+                        std::mem::take(&mut self.settings.last_version),
+                        self.settings.support_line_day,
+                    );
                     self.settings = Settings::default();
+                    self.settings.last_version = version;
+                    self.settings.support_line_day = note_day;
                     self.settings.saved_palettes = saved;
                     self.settings.install_ping = ping;
                     self.settings.ping_notice_seen = seen;

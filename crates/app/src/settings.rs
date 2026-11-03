@@ -192,6 +192,11 @@ pub struct Settings {
     pub install_ping: bool,
     /// The install-ping notice has been shown; no ping is sent before it has.
     pub ping_notice_seen: bool,
+    /// The version that last ran, so the first launch after an update is
+    /// known. Empty on a fresh install.
+    pub last_version: String,
+    /// Day (since the epoch) the "you just updated" note last showed; 0 = never.
+    pub support_line_day: u64,
 }
 
 /// Bounds shared by the slider UI and the load-time clamp.
@@ -218,6 +223,8 @@ impl Default for Settings {
             check_updates: true,
             install_ping: true,
             ping_notice_seen: false,
+            last_version: String::new(),
+            support_line_day: 0,
         }
     }
 }
@@ -261,6 +268,11 @@ impl Settings {
             .unwrap_or_default();
         settings.sanitize();
         settings
+    }
+
+    /// Has a settings file ever been written? (False on a fresh install.)
+    pub fn saved_before() -> bool {
+        config_path().is_some_and(|p| p.exists())
     }
 
     pub fn save(&self) {
