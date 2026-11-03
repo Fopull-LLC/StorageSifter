@@ -18,7 +18,6 @@ use eframe::egui;
 use serde::Deserialize;
 
 const LATEST_URL: &str = "https://api.github.com/repos/Fopull-LLC/StorageSifter/releases/latest";
-pub const RELEASES_URL: &str = "https://github.com/Fopull-LLC/StorageSifter/releases/latest";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
 /// How this copy was installed, which decides how it can be updated.
